@@ -24,7 +24,7 @@ kill -TERM <pid>  # or Ctrl+C
 
 ### Protocol-Agnostic Registry Core
 
-**Location:** `pkg/registry/core.go`
+**Location:** `internal/registry/core.go`
 
 The registry core is completely protocol-agnostic, using only native Go types with no serialization dependencies. It manages registers in-memory with thread-safe operations.
 
@@ -48,7 +48,7 @@ The registry core is completely protocol-agnostic, using only native Go types wi
 
 ### REST Protocol Layer
 
-**Location:** `pkg/rest/`
+**Location:** `internal/rest/`
 
 The REST layer is split by role:
 - `consumer.go` - Consumer endpoints (read, request changes)
@@ -129,12 +129,150 @@ The `errgroup.Group` coordinates multiple concurrent shutdown tasks.
 
 The generic `Listeners[T]` type in `listener.go` manages callback registration/removal with thread-safe operations. Used for both value changes and change requests.
 
+## Client Library Architecture
+
+The client library is organized in three layers, from low-level to high-level:
+
+### 1. Wire Protocol Layer (`pkg/wire/rest/`)
+
+Low-level HTTP clients that handle raw REST API calls:
+- `consumer.go` - `GetRegisters()`, `RequestChange()`
+- `provider.go` - `SetRegisters()`, `GetChangeRequests()`
+
+These use standard HTTP methods and handle JSON marshaling, but don't provide reactive patterns or batching.
+
+### 2. High-Level Client Interface (`pkg/client/`)
+
+**`client.go`** - Protocol-agnostic `Client` interface:
+```go
+type Client interface {
+    Consume(ctx context.Context, name string) (<-chan ValueAndMetadata, chan<- any, error)
+    Provide(ctx context.Context, name string, value any, metadata map[string]any, ttl time.Duration) (chan<- any, <-chan any, error)
+}
+```
+
+**Channel-based reactive API:**
+- `Consume()` - Returns receive-only channel for values, send-only channel for change requests
+  - Immediately sends initial value (no-wait GET)
+  - Continuous long-polling for updates
+- `Provide()` - Returns send-only channel for updates, receive-only channel for change requests
+  - Automatic TTL refresh at 50% interval
+  - Long-polling for change requests
+
+Both methods spawn goroutines that clean up automatically when context is cancelled.
+
+### 3. REST Client Implementation (`pkg/client/rest/`)
+
+**`client.go`** - Client struct and constructors:
+```go
+func NewClient(baseURL string) *Client
+func NewClientWithHTTPClient(baseURL string, httpClient *http.Client) *Client
+```
+
+**`consumer.go`** - Consumer implementation with batching:
+- Multiple `Consume()` calls share a single batch poller goroutine
+- Consolidates subscriptions into single HTTP GET with multiple `?name=` parameters
+- Long-polls every 5 seconds
+- Distributes updates to individual subscription channels
+
+**`provider.go`** - Provider implementation with batching:
+- Multiple `Provide()` calls share a single batch poller goroutine
+- Consolidates change request polling into single HTTP GET
+- Long-polls every 30 seconds
+- Auto-refreshes TTL at 50% interval for each register
+- Distributes change requests to individual provider channels
+
+**Batching optimization:**
+When multiple consumers/providers exist for different registers, the client makes a single HTTP request for all of them instead of one request per register. This dramatically reduces network overhead in IoT scenarios with many simultaneous subscriptions.
+
+### 4. Client Factory (`pkg/client/factory/`)
+
+Separate package to avoid import cycles (factory imports both `pkg/client` and `pkg/client/rest`).
+
+```go
+func NewClient(registryURL string) (client.Client, error)
+func NewClientFromEnv() (client.Client, error)
+```
+
+`NewClient()` creates a client based on URL scheme (currently only http/https supported). `NewClientFromEnv()` reads the `REGISTRY` environment variable.
+
+## CLI Commands
+
+### `serve` Command
+
+Starts the registry server:
+```bash
+./reg serve              # Default :8080
+./reg serve --addr :9000 # Custom address
+```
+
+See "Graceful Shutdown" section for shutdown behavior.
+
+### `provide` Command
+
+Provides a register and stays running for interactive updates:
+
+```bash
+# Provide register with default null value
+./reg provide temp
+
+# With initial value (JSON)
+./reg provide temp 25.5
+
+# With value and metadata (JSON)
+./reg provide temp 25.5 '{"unit":"celsius"}'
+
+# Custom TTL (default 5s)
+./reg provide temp 25.5 '{"unit":"celsius"}' --ttl 10s
+
+# Interactive usage
+echo '30.0' | ./reg provide temp 25.5 '{"unit":"celsius"}'
+```
+
+**Behavior:**
+- Requires `REGISTRY` environment variable (e.g., `http://localhost:8080`)
+- Creates register with initial value and metadata (both must be valid JSON)
+- Stays running, continuously:
+  - Reading new values from stdin (one JSON value per line)
+  - Writing consumer change requests to stdout (as JSON)
+  - Writing status messages to stderr
+
+**Example session:**
+```bash
+export REGISTRY=http://localhost:8080
+./reg provide temp 25.5 '{"unit":"celsius"}' &
+# stderr: Providing register 'temp' with value 25.5, metadata map[unit:celsius], TTL 5s
+# stderr: Reading new values from stdin (one JSON value per line)...
+# stderr: Writing change requests to stdout...
+
+echo '30.0'
+# stderr: Updated register 'temp' to: 30
+# stdout: (any consumer change requests as JSON)
+```
+
+Press Ctrl+C to stop providing (register expires after TTL).
+
 ## Code Organization
 
 ```
 cmd/
   serve.go           - Serve command, signal handling, shutdown coordination
+  provide.go         - Provide command, stdin/stdout interaction
+  root.go            - Root command, subcommand registration
 pkg/
+  client/
+    client.go        - Protocol-agnostic Client interface
+    factory/
+      factory.go     - URL-based client factory
+    rest/
+      client.go      - REST client struct and constructors
+      consumer.go    - Consume implementation with batching
+      provider.go    - Provide implementation with batching and TTL refresh
+  wire/
+    rest/
+      consumer.go    - Low-level consumer REST client
+      provider.go    - Low-level provider REST client
+internal/
   registry/
     core.go          - Protocol-agnostic registry implementation
     listener.go      - Generic notification listener pattern
@@ -152,7 +290,7 @@ main.go              - Entry point (minimal)
 
 To add WebSocket, MQTT, or other protocols:
 
-1. Create `pkg/{protocol}/` directory
+1. Create `internal/{protocol}/` directory
 2. Implement handlers that call registry methods:
    - `SetRegister()` for provider updates
    - `WaitForChange()` for consumer reads
