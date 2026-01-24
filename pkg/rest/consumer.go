@@ -3,8 +3,6 @@ package rest
 import (
 	"encoding/json"
 	"net/http"
-	"strings"
-	"time"
 )
 
 type ConsumerGetRegister struct {
@@ -27,25 +25,11 @@ type ConsumerPutRequest struct {
 func (s *Server) handleConsumer(w http.ResponseWriter, r *http.Request) {
 
 	if r.Method == http.MethodGet {
-
-		waitStr := r.URL.Query().Get("wait")
-		var wait time.Duration
-		if waitStr != "" {
-			var err error
-			wait, err = time.ParseDuration(waitStr)
-			if err != nil {
-				s.logger.Error("invalid wait parameter", "error", err)
-				http.Error(w, "invalid wait parameter", http.StatusBadRequest)
-				return
-			}
-		}
-
-		names := r.URL.Query()["name"]
-		if r.URL.Query().Has("names") {
-			nameStr := r.URL.Query().Get("names")
-			if nameStr != "" {
-				names = append(names, strings.Split(nameStr, ",")...)
-			}
+		names, wait, err := s.parseQueryParams(r)
+		if err != nil {
+			s.logger.Error("invalid wait parameter", "error", err)
+			http.Error(w, "invalid wait parameter", http.StatusBadRequest)
+			return
 		}
 
 		registers := s.registry.WaitForChange(names, wait)

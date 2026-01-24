@@ -26,8 +26,8 @@ type Registry struct {
 	pendingRequests   map[string]any
 	pendingRequestsMu sync.RWMutex
 
-	changeListeners        Listeners[string]
-	requestChangeListeners Listeners[string]
+	valueChangeListeners  Listeners[string]
+	changeRequestListeners Listeners[string]
 
 	logger *slog.Logger
 }
@@ -36,8 +36,8 @@ func NewRegistry(logger *slog.Logger) *Registry {
 	r := &Registry{
 		registers:              make(map[string]*Register),
 		pendingRequests:        make(map[string]any),
-		changeListeners:        *NewListeners[string](),
-		requestChangeListeners: *NewListeners[string](),
+		valueChangeListeners:   *NewListeners[string](),
+		changeRequestListeners: *NewListeners[string](),
 		logger:                 logger,
 	}
 	go r.cleanupExpiredRegisters()
@@ -53,7 +53,7 @@ func (r *Registry) cleanupExpiredRegisters() {
 		for name, reg := range r.registers {
 			if !reg.ttl.IsZero() && now.After(reg.ttl) {
 				delete(r.registers, name)
-				r.changeListeners.Notify(name)
+				r.valueChangeListeners.Notify(name)
 				r.logger.Info("register expired and removed", "name", name)
 			}
 		}
@@ -61,29 +61,35 @@ func (r *Registry) cleanupExpiredRegisters() {
 	}
 }
 
+// waitForNotification waits for a notification on the given listeners
+func (r *Registry) waitForNotification(listeners *Listeners[string], names []string, duration time.Duration) {
+	if duration <= 0 {
+		return
+	}
+
+	changed := make(chan struct{}, 1)
+	listenerID := listeners.Add(func(name string) {
+		if names == nil || slices.Contains(names, name) {
+			select {
+			case changed <- struct{}{}:
+			default:
+			}
+		}
+	})
+	defer listeners.Remove(listenerID)
+
+	timeoutTimer := time.NewTimer(duration)
+	defer timeoutTimer.Stop()
+	select {
+	case <-changed:
+	case <-timeoutTimer.C:
+	}
+}
+
 // WaitForChange waits for changes on the specified registers or until the duration elapses.
 // It's ok to call with nil names, which will wait for any change.
 func (r *Registry) WaitForChange(names []string, duration time.Duration) map[string]Register {
-
-	if duration > 0 {
-		changed := make(chan struct{}, 1)
-		listenerID := r.changeListeners.Add(func(name string) {
-			if names == nil || slices.Contains(names, name) {
-				select {
-				case changed <- struct{}{}:
-				default:
-				}
-			}
-		})
-		defer r.changeListeners.Remove(listenerID)
-
-		timeoutTimer := time.NewTimer(duration)
-		defer timeoutTimer.Stop()
-		select {
-		case <-changed:
-		case <-timeoutTimer.C:
-		}
-	}
+	r.waitForNotification(&r.valueChangeListeners, names, duration)
 
 	if names == nil {
 
@@ -139,7 +145,7 @@ func (r *Registry) SetRegister(name string, value any, metadata Metadata, ttl ti
 	if reg.Value != value {
 		reg.Value = value
 		r.logger.Debug("register value updated", "name", name, "ttl", ttl)
-		r.changeListeners.Notify(name)
+		r.valueChangeListeners.Notify(name)
 	}
 }
 
@@ -150,31 +156,13 @@ func (r *Registry) RequestChange(name string, value any) {
 
 	r.pendingRequests[name] = value
 	r.logger.Debug("change requested", "name", name)
-	r.requestChangeListeners.Notify(name)
+	r.changeRequestListeners.Notify(name)
 }
 
 // WaitForChangeRequests waits for change requests on specified registers or until duration elapses
 // Returns map of register names to requested values, consuming the requests from the queue
 func (r *Registry) WaitForChangeRequests(names []string, duration time.Duration) map[string]any {
-	if duration > 0 {
-		changed := make(chan struct{}, 1)
-		listenerID := r.requestChangeListeners.Add(func(name string) {
-			if names == nil || slices.Contains(names, name) {
-				select {
-				case changed <- struct{}{}:
-				default:
-				}
-			}
-		})
-		defer r.requestChangeListeners.Remove(listenerID)
-
-		timeoutTimer := time.NewTimer(duration)
-		defer timeoutTimer.Stop()
-		select {
-		case <-changed:
-		case <-timeoutTimer.C:
-		}
-	}
+	r.waitForNotification(&r.changeRequestListeners, names, duration)
 
 	r.pendingRequestsMu.Lock()
 	defer r.pendingRequestsMu.Unlock()

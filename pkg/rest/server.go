@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"strings"
+	"time"
 
 	"github.com/burgrp/reg/pkg/registry"
 	"golang.org/x/sync/errgroup"
@@ -29,6 +31,27 @@ func RunServer(address string, registry *registry.Registry, logger *slog.Logger,
 	mux.HandleFunc("/provider", server.handleProvider)
 
 	return http.ListenAndServe(address, mux)
+}
+
+// parseQueryParams extracts wait duration and register names from query parameters
+func (s *Server) parseQueryParams(r *http.Request) (names []string, wait time.Duration, err error) {
+	waitStr := r.URL.Query().Get("wait")
+	if waitStr != "" {
+		wait, err = time.ParseDuration(waitStr)
+		if err != nil {
+			return nil, 0, err
+		}
+	}
+
+	names = r.URL.Query()["name"]
+	if r.URL.Query().Has("names") {
+		nameStr := r.URL.Query().Get("names")
+		if nameStr != "" {
+			names = append(names, strings.Split(nameStr, ",")...)
+		}
+	}
+
+	return names, wait, nil
 }
 
 func (s *Server) writeResponse(w http.ResponseWriter, data any) {
