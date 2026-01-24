@@ -12,11 +12,11 @@ func (c *Client) Provide(ctx context.Context, name string, value any, metadata m
 
 	// Create subscription
 	sub := &providerSubscription{
-		name:           name,
-		initialValue:   value,
-		metadata:       metadata,
-		ttl:            ttl,
-		updates:        make(chan any, 1),
+		name:         name,
+		currentValue: value,
+		metadata:     metadata,
+		ttl:          ttl,
+		updates:      make(chan any, 1),
 		changeRequests: make(chan any, 1),
 	}
 	c.providerSubs[name] = sub
@@ -113,6 +113,13 @@ func (c *Client) handleProviderUpdates(ctx context.Context, name string, metadat
 			if !ok {
 				return
 			}
+			// Update current value in subscription
+			c.providerMu.Lock()
+			if sub, exists := c.providerSubs[name]; exists {
+				sub.currentValue = value
+			}
+			c.providerMu.Unlock()
+
 			c.providerClient.SetRegister(ctx, name, value, metadata, ttl)
 		}
 	}
@@ -136,14 +143,15 @@ func (c *Client) handleTTLRefresh(ctx context.Context, name string, metadata map
 		case <-ticker.C:
 			c.providerMu.Lock()
 			sub, exists := c.providerSubs[name]
-			c.providerMu.Unlock()
-
 			if !exists {
+				c.providerMu.Unlock()
 				return
 			}
+			currentValue := sub.currentValue
+			c.providerMu.Unlock()
 
-			// Get current value from subscription
-			c.providerClient.SetRegister(ctx, name, sub.initialValue, metadata, ttl)
+			// Refresh with current value
+			c.providerClient.SetRegister(ctx, name, currentValue, metadata, ttl)
 		}
 	}
 }

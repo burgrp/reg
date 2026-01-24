@@ -34,11 +34,11 @@ type consumerSubscription struct {
 }
 
 type providerSubscription struct {
-	name           string
-	initialValue   any
-	metadata       map[string]any
-	ttl            time.Duration
-	updates        chan any
+	name         string
+	currentValue any
+	metadata     map[string]any
+	ttl          time.Duration
+	updates      chan any
 	changeRequests chan any
 }
 

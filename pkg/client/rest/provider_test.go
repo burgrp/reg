@@ -134,6 +134,74 @@ func TestClient_Provide_ChangeRequests(t *testing.T) {
 	}
 }
 
+func TestClient_Provide_TTLRefreshUsesCurrentValue(t *testing.T) {
+	type putRequest struct {
+		value any
+		time  time.Time
+	}
+	putRequests := make(chan putRequest, 10)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPut {
+			var req rest.ProviderPutRequest
+			json.NewDecoder(r.Body).Decode(&req)
+			if reg, exists := req.Registers["temp"]; exists {
+				putRequests <- putRequest{value: reg.Value, time: time.Now()}
+			}
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+
+		// GET request
+		response := rest.ProviderGetResponse{
+			Registers: map[string]rest.ProviderGetRegister{},
+		}
+		json.NewEncoder(w).Encode(response)
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// Provide with 2 second TTL (refresh at 1 second)
+	updates, _, err := client.Provide(ctx, "temp", 25.5, nil, 2*time.Second)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	// Get initial PUT
+	initialReq := <-putRequests
+	if initialReq.value != 25.5 {
+		t.Errorf("Expected initial value 25.5, got %v", initialReq.value)
+	}
+
+	// Send update to 30.0
+	updates <- 30.0
+
+	// Get update PUT
+	updateReq := <-putRequests
+	if updateReq.value != 30.0 {
+		t.Errorf("Expected update value 30.0, got %v", updateReq.value)
+	}
+
+	// Wait for TTL refresh (should happen at ~1 second)
+	// The refresh should use the current value (30.0), not initial value (25.5)
+	select {
+	case refreshReq := <-putRequests:
+		if refreshReq.value != 30.0 {
+			t.Errorf("TTL refresh should use current value 30.0, but got %v (initial value was 25.5)", refreshReq.value)
+		}
+		// Verify this happened around the refresh interval
+		timeSinceUpdate := refreshReq.time.Sub(updateReq.time)
+		if timeSinceUpdate < 900*time.Millisecond || timeSinceUpdate > 1200*time.Millisecond {
+			t.Logf("Warning: TTL refresh timing was %v, expected ~1s", timeSinceUpdate)
+		}
+	case <-time.After(2 * time.Second):
+		t.Error("Timeout waiting for TTL refresh")
+	}
+}
+
 func TestClient_Provide_ContextCancel(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPut {

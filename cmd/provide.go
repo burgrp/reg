@@ -8,7 +8,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/burgrp/reg/pkg/client/factory"
+	clientfactory "github.com/burgrp/reg/pkg/client/factory"
 	"github.com/spf13/cobra"
 )
 
