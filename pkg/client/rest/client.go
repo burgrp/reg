@@ -2,6 +2,7 @@ package rest
 
 import (
 	"context"
+	"net/http"
 	"sync"
 	"time"
 
@@ -41,11 +42,17 @@ type providerSubscription struct {
 	changeRequests chan any
 }
 
-// NewClient creates a new REST-based registry client
+// NewClient creates a new REST-based registry client with a default HTTP client
 func NewClient(baseURL string) *Client {
+	httpClient := &http.Client{}
+	return NewClientWithHTTPClient(baseURL, httpClient)
+}
+
+// NewClientWithHTTPClient creates a new REST-based registry client with a custom HTTP client
+func NewClientWithHTTPClient(baseURL string, httpClient *http.Client) *Client {
 	return &Client{
-		consumerClient: rest.NewConsumerClient(baseURL),
-		providerClient: rest.NewProviderClient(baseURL),
+		consumerClient: rest.NewConsumerClientWithHTTPClient(baseURL, httpClient),
+		providerClient: rest.NewProviderClientWithHTTPClient(baseURL, httpClient),
 		consumerSubs:   make(map[string]*consumerSubscription),
 		providerSubs:   make(map[string]*providerSubscription),
 	}
