@@ -5,10 +5,10 @@ import (
 	"time"
 )
 
-// Registry defines the protocol-agnostic interface for interacting with the registry.
+// Client defines the protocol-agnostic interface for interacting with the registry.
 // Implementations handle the underlying protocol details (REST, gRPC, etc.) and
 // provide channel-based, reactive access to registers.
-type Registry interface {
+type Client interface {
 	// Consume subscribes to a register and returns channels for reading values and requesting changes.
 	// The values channel immediately receives the current value (with no-wait GET internally),
 	// then continuously polls for updates using long-polling.

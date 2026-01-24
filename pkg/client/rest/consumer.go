@@ -7,7 +7,7 @@ import (
 	"github.com/burgrp/reg/pkg/client"
 )
 
-// Consume implements Registry.Consume
+// Consume implements client.Client.Consume
 func (c *Client) Consume(ctx context.Context, name string) (<-chan client.ValueAndMetadata, chan<- any, error) {
 	c.consumerMu.Lock()
 	defer c.consumerMu.Unlock()

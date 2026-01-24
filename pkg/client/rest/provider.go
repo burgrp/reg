@@ -5,7 +5,7 @@ import (
 	"time"
 )
 
-// Provide implements Registry.Provide
+// Provide implements client.Client.Provide
 func (c *Client) Provide(ctx context.Context, name string, value any, metadata map[string]any, ttl time.Duration) (chan<- any, <-chan any, error) {
 	c.providerMu.Lock()
 	defer c.providerMu.Unlock()

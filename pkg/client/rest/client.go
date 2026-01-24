@@ -10,7 +10,7 @@ import (
 	"github.com/burgrp/reg/pkg/wire/rest"
 )
 
-// Client implements the Registry interface using REST protocol
+// Client implements the client.Client interface using REST protocol
 type Client struct {
 	consumerClient *rest.ConsumerClient
 	providerClient *rest.ProviderClient
