@@ -1,0 +1,173 @@
+package rest
+
+import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+	"time"
+
+	"github.com/burgrp/reg/pkg/wire/rest"
+)
+
+func TestClient_Provide_InitialValue(t *testing.T) {
+	receivedInitial := make(chan bool, 1)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPut && r.URL.Path == "/provider" {
+			var req rest.ProviderPutRequest
+			json.NewDecoder(r.Body).Decode(&req)
+			if req.Registers["temp"].Value == 25.5 {
+				receivedInitial <- true
+			}
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+
+		// GET request
+		response := rest.ProviderGetResponse{
+			Registers: map[string]rest.ProviderGetRegister{},
+		}
+		json.NewEncoder(w).Encode(response)
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL)
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+	defer cancel()
+
+	metadata := map[string]any{"unit": "C"}
+	_, _, err := client.Provide(ctx, "temp", 25.5, metadata, 10*time.Second)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	// Verify server received initial value
+	select {
+	case <-receivedInitial:
+		// Success
+	case <-time.After(500 * time.Millisecond):
+		t.Error("Server did not receive initial value")
+	}
+}
+
+func TestClient_Provide_Updates(t *testing.T) {
+	receivedUpdate := make(chan float64, 1)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPut {
+			var req rest.ProviderPutRequest
+			json.NewDecoder(r.Body).Decode(&req)
+			if val, ok := req.Registers["temp"].Value.(float64); ok && val == 26.0 {
+				receivedUpdate <- val
+			}
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+
+		// GET request
+		response := rest.ProviderGetResponse{
+			Registers: map[string]rest.ProviderGetRegister{},
+		}
+		json.NewEncoder(w).Encode(response)
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL)
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+	defer cancel()
+
+	updates, _, err := client.Provide(ctx, "temp", 25.5, nil, 10*time.Second)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	// Send update
+	updates <- 26.0
+
+	// Verify server received it
+	select {
+	case val := <-receivedUpdate:
+		if val != 26.0 {
+			t.Errorf("Expected update value 26.0, got %v", val)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Error("Server did not receive update")
+	}
+}
+
+func TestClient_Provide_ChangeRequests(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPut {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+
+		// GET request - return change request
+		response := rest.ProviderGetResponse{
+			Registers: map[string]rest.ProviderGetRegister{
+				"temp": {Value: 30.0},
+			},
+		}
+		json.NewEncoder(w).Encode(response)
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	_, changeRequests, err := client.Provide(ctx, "temp", 25.5, nil, 10*time.Second)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	// Should receive change request
+	select {
+	case val := <-changeRequests:
+		if val != 30.0 {
+			t.Errorf("Expected change request 30.0, got %v", val)
+		}
+	case <-time.After(1 * time.Second):
+		t.Error("Timeout waiting for change request")
+	}
+}
+
+func TestClient_Provide_ContextCancel(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPut {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		response := rest.ProviderGetResponse{
+			Registers: map[string]rest.ProviderGetRegister{},
+		}
+		json.NewEncoder(w).Encode(response)
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL)
+	ctx, cancel := context.WithCancel(context.Background())
+
+	_, changeRequests, err := client.Provide(ctx, "temp", 25.5, nil, 10*time.Second)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	// Cancel context
+	cancel()
+
+	// ChangeRequests channel should close
+	select {
+	case _, ok := <-changeRequests:
+		if ok {
+			t.Error("ChangeRequests channel should be closed")
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Error("ChangeRequests channel did not close")
+	}
+
+	// For send-only updates channel, we can't directly check if it's closed,
+	// but the goroutine should exit cleanly on context cancel
+}
