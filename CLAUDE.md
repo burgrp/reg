@@ -1,157 +1,187 @@
-# Registry (reg) - Architecture Documentation
+# CLAUDE.md
 
-## Overview
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-Registry is an IoT-focused service for managing "registers" - named entities with dynamic values and metadata. It implements a Provider/Consumer model with automatic lifecycle management based on TTL (time-to-live).
+## Project Overview
 
-## Core Concepts
+Registry (`reg`) is an IoT-focused service for managing "registers" - named entities with dynamic values and metadata. It implements a simplified Provider/Consumer model with automatic lifecycle management based on TTL (time-to-live).
 
-### Register
+## Build and Run
 
-A register represents an IoT entity with three components:
-- **Name**: Unique identifier (string)
-- **Value**: Dynamic value of any JSON-compatible type (`any`)
-- **Metadata**: Static configuration data (`map[string]any`)
+```bash
+# Build the binary
+go build -o reg
 
-Metadata is set by the provider and should not change during the register's lifetime. Only the value is dynamic.
+# Run the server
+./reg serve
+./reg serve --addr :8080
 
-### Provider/Consumer Model
+# Graceful shutdown
+kill -TERM <pid>  # or Ctrl+C
+```
 
-**Provider:**
-- Creates and owns registers
-- Updates register values
-- Must send updates within TTL window or register is removed
-- Receives update requests from consumers (async)
-- Provider connection determines register lifetime
+## Core Architecture
 
-**Consumer:**
-- Reads register values
-- Requests updates (no synchronous reply)
-- Subscribes to value changes
-- Receives `nil` value when register becomes unavailable
-
-### TTL-Based Lifecycle
-
-Registers have a time-to-live (TTL) specified in milliseconds:
-1. Provider sends update with value, metadata, and TTL
-2. Registry starts a timer for the specified TTL
-3. Provider must send next update before TTL expires
-4. If TTL expires:
-   - Register is removed from registry
-   - Subscribed consumers receive `nil` value notification
-   - Provider must recreate register if needed
-
-The `nil` value is the standard indicator for missing/unavailable registers.
-
-## Architecture
-
-### Protocol-Agnostic Core
+### Protocol-Agnostic Registry Core
 
 **Location:** `pkg/registry/core.go`
 
-The core registry is completely protocol-agnostic:
-- Uses native Go types (`any`, `map[string]any`)
-- No JSON or serialization dependencies
-- Thread-safe with `sync.RWMutex`
-- Implements Provider/Consumer interfaces
+The registry core is completely protocol-agnostic, using only native Go types with no serialization dependencies. It manages registers in-memory with thread-safe operations.
 
-**Key Operations:**
-- `RegisterProvider(Provider)` / `UnregisterProvider(string)` - Manage provider connections
-- `RegisterConsumer(Consumer)` / `UnregisterConsumer(string)` - Manage consumer connections
-- `ProviderUpdateRegister(providerID, name, value, metadata, ttlMs)` - Create/update register
-- `ConsumerRequestUpdate(consumerID, name, value)` - Request update (forwarded to provider)
-- `Get(name)` / `List()` - Read operations
-- `Subscribe(consumerID, registerName)` - Subscribe to updates
+**Key data structures:**
+- `registers` - Map of register name to Register (value, metadata, TTL)
+- `pendingRequests` - Queue per register for consumer change requests (latest only)
+- `valueChangeListeners` - Notifies when register values change
+- `changeRequestListeners` - Notifies when consumers request changes
 
-**Important:** The unified `ProviderUpdateRegister` method handles both creation and updates. No separate create operation exists.
+**Core operations:**
+- `SetRegister(name, value, metadata, ttl)` - Provider creates/updates register
+- `WaitForChange(names, duration)` - Consumer reads/polls for register changes (long polling)
+- `RequestChange(name, value)` - Consumer requests value change
+- `WaitForChangeRequests(names, duration)` - Provider polls for change requests (long polling)
 
-### Protocol Implementations
+**Lifecycle management:**
+- Background goroutine checks TTL expiry every 1 second
+- Expired registers are deleted and listeners notified
+- Default TTL is 10 seconds if not specified
+- Cleanup goroutine respects shutdown signal via `stopChan`
 
-Each protocol (REST, WebSocket, MQTT, etc.) implements serialization and transport:
-- Converts between protocol format and native Go types
-- Manages protocol-specific connection lifecycle
-- Implements Provider/Consumer interfaces for bidirectional communication
+### REST Protocol Layer
 
-**REST Implementation:** `pkg/rest/server.go`
+**Location:** `pkg/rest/`
 
-Consumer endpoints:
-- `GET /registers` - List all registers
-- `GET /registers/{name}` - Read register
-- `PUT /registers/{name}` - Request update (returns 202 Accepted)
+The REST layer is split by role:
+- `consumer.go` - Consumer endpoints (read, request changes)
+- `provider.go` - Provider endpoints (set registers, poll for requests)
+- `server.go` - HTTP server setup, graceful shutdown, shared helpers
 
-Provider endpoints:
-- `PUT /provider/registers/{name}` - Create or update register
+**Consumer endpoints:**
+- `GET /consumer?name=X&wait=5s` - Read registers with optional long polling
+- `PUT /consumer` - Request value changes (returns 202 Accepted)
 
-Request format:
+**Provider endpoints:**
+- `PUT /provider` - Set/update registers with value, metadata, TTL
+- `GET /provider?name=X&wait=30s` - Poll for consumer change requests
+
+**Request/Response format:**
 ```json
 {
-  "value": <any>,
-  "metadata": {"key": "value"},
-  "ttl": 5000
+  "registers": {
+    "temp": {
+      "value": 25.5,
+      "metadata": {"unit": "celsius"},
+      "ttl": "5s"
+    }
+  }
 }
 ```
 
-## Design Decisions
+TTL uses Go duration format: "5s", "10m", "1h30m". This is handled by the custom `Duration` type in `duration.go` that unmarshals from JSON strings.
 
-### Why Unified Create/Update Endpoint?
+### Long Polling Pattern
 
-Providers continuously update registers. Having separate create/update operations adds complexity:
-- Provider doesn't need to track whether register exists
-- Simpler state management
-- Natural fit for IoT sensors that periodically send data
+Both consumer reads and provider request polling use the same wait/notify pattern:
 
-### Why TTL-Based Lifecycle?
+1. If `wait` parameter specified, register listener for changes
+2. Block until notification arrives OR timeout
+3. Return current state (consuming pending requests for providers)
 
-- Automatic cleanup when providers go offline
-- No explicit disconnect/cleanup protocol needed
-- Consumers immediately know when data is stale
-- Provider controls update frequency based on data characteristics
+The `waitForNotification()` helper in core.go implements this pattern for both value changes and change requests.
 
-### Why nil for Missing Values?
+### Change Request Flow
 
-- Simple, clear semantics
-- JSON-compatible (`null`)
-- Distinguishes "register doesn't exist" from "value is 0/false/empty"
-- Consistent across all protocol implementations
+1. Consumer calls `PUT /consumer` with desired value
+2. Request stored in `pendingRequests` map (latest only per register)
+3. `changeRequestListeners` notified
+4. Provider polling on `GET /provider` receives the request
+5. Request consumed (removed from queue)
+6. Provider decides to accept/reject/modify
+7. Provider updates via `PUT /provider` if accepted
+8. Consumers see new value via `GET /consumer` or long polling
 
-### Why Async Consumer Updates?
+There is no synchronous reply to consumers - they observe the actual value through polling or subscriptions.
 
-Consumer update requests are forwarded to providers asynchronously:
-- No synchronous reply to consumer
-- Provider decides whether to accept, reject, or modify the requested value
-- Provider updates registry if it accepts the change
-- Consumers see the actual value through subscription or polling
+## Key Design Patterns
 
-This matches real IoT scenarios where:
-- Devices may accept values within constraints (e.g., thermostat limiting range)
-- Devices may be temporarily offline
-- Update success depends on physical device capabilities
+### No Static Variables or init()
 
-## Command Structure
+Commands use factory functions (`newServeCmd()`, `newRootCmd()`) instead of package-level variables and `init()`. This enables clean dependency injection and testability.
 
-The CLI uses Cobra without static variables or `init()` functions:
-- Factory functions create commands (`newServeCmd()`, `newRootCmd()`)
-- Clean dependency injection
-- Commands are constructed at runtime
+### Simplified Model (No Explicit Provider/Consumer Interfaces)
 
-**Serve Command:**
-```bash
-reg serve --addr :8080
+Unlike the original design documented in CLAUDE.md, the current implementation does NOT use explicit Provider/Consumer interfaces. Instead:
+- Protocols call registry methods directly
+- No connection tracking or ownership
+- Registers exist independently until TTL expires
+- Simpler implementation, sufficient for IoT use cases
+
+### Graceful Shutdown
+
+Shutdown sequence on SIGINT/SIGTERM:
+1. Context cancelled
+2. Signal sent to cleanup goroutine via `stopChan`
+3. HTTP server shutdown with 10-second timeout for in-flight requests
+4. All goroutines exit cleanly
+
+The `errgroup.Group` coordinates multiple concurrent shutdown tasks.
+
+### Listener Pattern for Notifications
+
+The generic `Listeners[T]` type in `listener.go` manages callback registration/removal with thread-safe operations. Used for both value changes and change requests.
+
+## Code Organization
+
+```
+cmd/
+  serve.go           - Serve command, signal handling, shutdown coordination
+pkg/
+  registry/
+    core.go          - Protocol-agnostic registry implementation
+    listener.go      - Generic notification listener pattern
+  rest/
+    server.go        - HTTP server, graceful shutdown, shared helpers
+    consumer.go      - Consumer REST endpoints
+    provider.go      - Provider REST endpoints
+    duration.go      - Custom Duration type for JSON unmarshaling
+main.go              - Entry point (minimal)
 ```
 
-Starts the registry server with:
-- Tint-colored structured logging (slog)
-- REST API on specified address
-- Core registry with provider/consumer management
+## Development Notes
 
-## Future Protocol Implementations
+### Adding New Protocol Implementations
 
-To add a new protocol:
+To add WebSocket, MQTT, or other protocols:
 
-1. Create `pkg/{protocol}/server.go`
-2. Implement serialization for your protocol
-3. Implement `Provider` and `Consumer` interfaces
-4. Register providers/consumers with core registry
-5. Handle subscription notifications (SSE, WebSocket, MQTT, etc.)
+1. Create `pkg/{protocol}/` directory
+2. Implement handlers that call registry methods:
+   - `SetRegister()` for provider updates
+   - `WaitForChange()` for consumer reads
+   - `RequestChange()` for consumer requests
+   - `WaitForChangeRequests()` for provider polling
+3. Handle protocol-specific serialization (core uses `any` and `map[string]any`)
+4. Integrate with graceful shutdown via context cancellation
 
 The core registry handles all business logic - protocols only deal with transport and serialization.
+
+### TTL Management
+
+- TTL is specified as Go duration string ("5s", "10m") in REST
+- Stored internally as absolute time (`time.Time`)
+- Periodic cleanup checks every 1 second
+- Missing/zero TTL defaults to 10 seconds
+- Expired registers are removed, not marked as stale
+
+### Thread Safety
+
+- Registry uses `sync.RWMutex` for registers and pending requests separately
+- Listeners have their own mutex
+- Long-polling wait blocks outside locks to avoid deadlocks
+- Cleanup goroutine holds write lock during expiry check
+
+### Logging
+
+Uses `slog` with `tint` handler for colored, structured logs:
+- Info: Lifecycle events (startup, shutdown, register expiry)
+- Debug: Register changes, change requests
+- Warn: Register expiry (data loss)
+- Error: HTTP encoding failures, shutdown errors
