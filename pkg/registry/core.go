@@ -23,16 +23,22 @@ type Registry struct {
 	registers   map[string]*Register
 	registersMu sync.RWMutex
 
-	changeListeners Listeners[string]
+	pendingRequests   map[string]any
+	pendingRequestsMu sync.RWMutex
+
+	changeListeners        Listeners[string]
+	requestChangeListeners Listeners[string]
 
 	logger *slog.Logger
 }
 
 func NewRegistry(logger *slog.Logger) *Registry {
 	r := &Registry{
-		registers:       make(map[string]*Register),
-		changeListeners: *NewListeners[string](),
-		logger:          logger,
+		registers:              make(map[string]*Register),
+		pendingRequests:        make(map[string]any),
+		changeListeners:        *NewListeners[string](),
+		requestChangeListeners: *NewListeners[string](),
+		logger:                 logger,
 	}
 	go r.cleanupExpiredRegisters()
 	return r
@@ -135,4 +141,61 @@ func (r *Registry) SetRegister(name string, value any, metadata Metadata, ttl ti
 		r.logger.Debug("register value updated", "name", name, "ttl", ttl)
 		r.changeListeners.Notify(name)
 	}
+}
+
+// RequestChange stores a consumer's request to change a register value
+func (r *Registry) RequestChange(name string, value any) {
+	r.pendingRequestsMu.Lock()
+	defer r.pendingRequestsMu.Unlock()
+
+	r.pendingRequests[name] = value
+	r.logger.Debug("change requested", "name", name)
+	r.requestChangeListeners.Notify(name)
+}
+
+// WaitForChangeRequests waits for change requests on specified registers or until duration elapses
+// Returns map of register names to requested values, consuming the requests from the queue
+func (r *Registry) WaitForChangeRequests(names []string, duration time.Duration) map[string]any {
+	if duration > 0 {
+		changed := make(chan struct{}, 1)
+		listenerID := r.requestChangeListeners.Add(func(name string) {
+			if names == nil || slices.Contains(names, name) {
+				select {
+				case changed <- struct{}{}:
+				default:
+				}
+			}
+		})
+		defer r.requestChangeListeners.Remove(listenerID)
+
+		timeoutTimer := time.NewTimer(duration)
+		defer timeoutTimer.Stop()
+		select {
+		case <-changed:
+		case <-timeoutTimer.C:
+		}
+	}
+
+	r.pendingRequestsMu.Lock()
+	defer r.pendingRequestsMu.Unlock()
+
+	requests := make(map[string]any)
+
+	if names == nil {
+		// Return all pending requests
+		for name, value := range r.pendingRequests {
+			requests[name] = value
+			delete(r.pendingRequests, name)
+		}
+	} else {
+		// Return only specified registers that have pending requests
+		for _, name := range names {
+			if value, exists := r.pendingRequests[name]; exists {
+				requests[name] = value
+				delete(r.pendingRequests, name)
+			}
+		}
+	}
+
+	return requests
 }
