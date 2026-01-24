@@ -6,24 +6,30 @@ import (
 	"time"
 )
 
+// ProviderPutRegister represents a register update from a provider
 type ProviderPutRegister struct {
 	Value    any            `json:"value,omitempty"`
 	Metadata map[string]any `json:"metadata,omitempty"`
 	TTL      Duration       `json:"ttl,omitempty"`
 }
 
+// ProviderPutRequest is the request format for provider PUT requests
 type ProviderPutRequest struct {
 	Registers map[string]ProviderPutRegister `json:"registers"`
 }
 
+// ProviderGetRegister represents a change request in provider GET responses
 type ProviderGetRegister struct {
 	Value any `json:"value,omitempty"`
 }
 
+// ProviderResponse is the response format for provider GET requests
 type ProviderResponse struct {
 	Registers map[string]ProviderGetRegister `json:"registers"`
 }
 
+// handleProvider handles provider endpoints: PUT for setting/updating registers,
+// GET for polling consumer change requests with long polling support
 func (s *Server) handleProvider(w http.ResponseWriter, r *http.Request) {
 
 	if r.Method == http.MethodGet {

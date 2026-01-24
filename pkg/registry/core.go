@@ -7,6 +7,7 @@ import (
 	"time"
 )
 
+// Metadata contains static configuration data for a register
 type Metadata map[string]any
 
 const defaultTTL = 10 * time.Second
@@ -32,6 +33,7 @@ type Registry struct {
 	logger *slog.Logger
 }
 
+// NewRegistry creates a new registry instance with the given logger
 func NewRegistry(logger *slog.Logger) *Registry {
 	r := &Registry{
 		registers:              make(map[string]*Register),
@@ -48,6 +50,8 @@ func (r *Registry) Start(stopChan <-chan struct{}) {
 	go r.cleanupExpiredRegisters(stopChan)
 }
 
+// cleanupExpiredRegisters runs a background goroutine that checks for expired registers every second
+// and removes them, notifying listeners. It stops when stopChan is closed.
 func (r *Registry) cleanupExpiredRegisters(stopChan <-chan struct{}) {
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
@@ -71,7 +75,8 @@ func (r *Registry) cleanupExpiredRegisters(stopChan <-chan struct{}) {
 	}
 }
 
-// waitForNotification waits for a notification on the given listeners
+// waitForNotification waits for a notification on the given listeners matching the specified names.
+// If names is nil, it waits for any notification. Returns when a notification arrives or duration elapses.
 func (r *Registry) waitForNotification(listeners *Listeners[string], names []string, duration time.Duration) {
 	if duration <= 0 {
 		return

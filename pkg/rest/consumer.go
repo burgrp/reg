@@ -5,23 +5,29 @@ import (
 	"net/http"
 )
 
+// ConsumerGetRegister represents a register in consumer GET responses
 type ConsumerGetRegister struct {
 	Value    any            `json:"value,omitempty"`
 	Metadata map[string]any `json:"metadata,omitempty"`
 }
 
+// ConsumerGetResponse is the response format for consumer GET requests
 type ConsumerGetResponse struct {
 	Registers map[string]ConsumerGetRegister `json:"registers"`
 }
 
+// ConsumerPutRegister represents a register update request from a consumer
 type ConsumerPutRegister struct {
 	Value any `json:"value,omitempty"`
 }
 
+// ConsumerPutRequest is the request format for consumer PUT requests
 type ConsumerPutRequest struct {
 	Registers map[string]ConsumerPutRegister `json:"registers"`
 }
 
+// handleConsumer handles consumer endpoints: GET for reading registers with long polling,
+// PUT for requesting value changes (returns 202 Accepted)
 func (s *Server) handleConsumer(w http.ResponseWriter, r *http.Request) {
 
 	if r.Method == http.MethodGet {

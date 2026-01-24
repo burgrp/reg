@@ -18,6 +18,9 @@ type Server struct {
 	logger   *slog.Logger
 }
 
+// RunServer starts the HTTP server on the given address with graceful shutdown support.
+// It starts the HTTP server in a goroutine and waits for context cancellation to initiate shutdown.
+// The server will wait up to 10 seconds for in-flight requests to complete.
 func RunServer(ctx context.Context, address string, registry *registry.Registry, logger *slog.Logger, eg *errgroup.Group) error {
 	server := &Server{
 		registry: registry,
@@ -84,6 +87,7 @@ func (s *Server) parseQueryParams(r *http.Request) (names []string, wait time.Du
 	return names, wait, nil
 }
 
+// writeResponse encodes data as JSON and writes it to the response writer
 func (s *Server) writeResponse(w http.ResponseWriter, data any) {
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(data); err != nil {
