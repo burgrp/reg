@@ -26,7 +26,7 @@ type Registry struct {
 	pendingRequests   map[string]any
 	pendingRequestsMu sync.RWMutex
 
-	valueChangeListeners  Listeners[string]
+	valueChangeListeners   Listeners[string]
 	changeRequestListeners Listeners[string]
 
 	logger *slog.Logger
@@ -54,7 +54,7 @@ func (r *Registry) cleanupExpiredRegisters(stopChan <-chan struct{}) {
 	for {
 		select {
 		case <-stopChan:
-			r.logger.Info("stopping cleanup goroutine")
+			r.logger.Debug("stopping cleanup goroutine")
 			return
 		case <-ticker.C:
 			now := time.Now()
@@ -63,7 +63,7 @@ func (r *Registry) cleanupExpiredRegisters(stopChan <-chan struct{}) {
 				if !reg.ttl.IsZero() && now.After(reg.ttl) {
 					delete(r.registers, name)
 					r.valueChangeListeners.Notify(name)
-					r.logger.Info("register expired and removed", "name", name)
+					r.logger.Warn("register expired and removed", "name", name)
 				}
 			}
 			r.registersMu.Unlock()
@@ -154,7 +154,7 @@ func (r *Registry) SetRegister(name string, value any, metadata Metadata, ttl ti
 
 	if reg.Value != value {
 		reg.Value = value
-		r.logger.Debug("register value updated", "name", name, "ttl", ttl)
+		r.logger.Debug("register changed", "name", name, "value", value, "ttl", ttl)
 		r.valueChangeListeners.Notify(name)
 	}
 }
@@ -165,7 +165,7 @@ func (r *Registry) RequestChange(name string, value any) {
 	defer r.pendingRequestsMu.Unlock()
 
 	r.pendingRequests[name] = value
-	r.logger.Debug("change requested", "name", name)
+	r.logger.Debug("register change requested", "name", name, "value", value)
 	r.changeRequestListeners.Notify(name)
 }
 

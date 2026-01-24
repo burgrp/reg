@@ -36,7 +36,7 @@ func RunServer(ctx context.Context, address string, registry *registry.Registry,
 
 	// Start HTTP server in goroutine
 	eg.Go(func() error {
-		server.logger.Info("starting REST server", "addr", address)
+		server.logger.Info("REST server listening", "addr", address)
 		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			return err
 		}
