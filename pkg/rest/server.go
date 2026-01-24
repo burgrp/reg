@@ -1,6 +1,7 @@
 package rest
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -17,20 +18,49 @@ type Server struct {
 	logger   *slog.Logger
 }
 
-func RunServer(address string, registry *registry.Registry, logger *slog.Logger, eg *errgroup.Group) error {
+func RunServer(ctx context.Context, address string, registry *registry.Registry, logger *slog.Logger, eg *errgroup.Group) error {
 	server := &Server{
 		registry: registry,
 		logger:   logger,
 	}
-
-	server.logger.Info("starting REST server", "addr", address)
 
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/consumer", server.handleConsumer)
 	mux.HandleFunc("/provider", server.handleProvider)
 
-	return http.ListenAndServe(address, mux)
+	httpServer := &http.Server{
+		Addr:    address,
+		Handler: mux,
+	}
+
+	// Start HTTP server in goroutine
+	eg.Go(func() error {
+		server.logger.Info("starting REST server", "addr", address)
+		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			return err
+		}
+		return nil
+	})
+
+	// Wait for context cancellation (shutdown signal)
+	eg.Go(func() error {
+		<-ctx.Done()
+		server.logger.Info("shutting down REST server")
+
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		if err := httpServer.Shutdown(shutdownCtx); err != nil {
+			server.logger.Error("error during server shutdown", "error", err)
+			return err
+		}
+
+		server.logger.Info("REST server stopped")
+		return nil
+	})
+
+	return nil
 }
 
 // parseQueryParams extracts wait duration and register names from query parameters

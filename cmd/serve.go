@@ -1,8 +1,11 @@
 package cmd
 
 import (
+	"context"
 	"log/slog"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/burgrp/reg/pkg/registry"
@@ -36,14 +39,35 @@ func runServe(addr string) error {
 		TimeFormat: time.TimeOnly,
 	}))
 
+	// Create context that cancels on shutdown signal
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Setup signal handling
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+
 	// Create registry
-	registry := registry.NewRegistry(logger)
+	reg := registry.NewRegistry(logger)
+
+	// Create stop channel for registry cleanup goroutine
+	stopChan := make(chan struct{})
+	reg.Start(stopChan)
 
 	var errGroup errgroup.Group
 
 	// Start REST server
+	if err := rest.RunServer(ctx, addr, reg, logger, &errGroup); err != nil {
+		return err
+	}
+
+	// Handle shutdown signal
 	errGroup.Go(func() error {
-		return rest.RunServer(addr, registry, logger, &errGroup)
+		sig := <-sigChan
+		logger.Info("received shutdown signal", "signal", sig)
+		cancel()
+		close(stopChan)
+		return nil
 	})
 
 	return errGroup.Wait()

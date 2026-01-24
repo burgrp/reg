@@ -40,24 +40,34 @@ func NewRegistry(logger *slog.Logger) *Registry {
 		changeRequestListeners: *NewListeners[string](),
 		logger:                 logger,
 	}
-	go r.cleanupExpiredRegisters()
 	return r
 }
 
-func (r *Registry) cleanupExpiredRegisters() {
+// Start starts background tasks (cleanup goroutine)
+func (r *Registry) Start(stopChan <-chan struct{}) {
+	go r.cleanupExpiredRegisters(stopChan)
+}
+
+func (r *Registry) cleanupExpiredRegisters(stopChan <-chan struct{}) {
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
-	for range ticker.C {
-		now := time.Now()
-		r.registersMu.Lock()
-		for name, reg := range r.registers {
-			if !reg.ttl.IsZero() && now.After(reg.ttl) {
-				delete(r.registers, name)
-				r.valueChangeListeners.Notify(name)
-				r.logger.Info("register expired and removed", "name", name)
+	for {
+		select {
+		case <-stopChan:
+			r.logger.Info("stopping cleanup goroutine")
+			return
+		case <-ticker.C:
+			now := time.Now()
+			r.registersMu.Lock()
+			for name, reg := range r.registers {
+				if !reg.ttl.IsZero() && now.After(reg.ttl) {
+					delete(r.registers, name)
+					r.valueChangeListeners.Notify(name)
+					r.logger.Info("register expired and removed", "name", name)
+				}
 			}
+			r.registersMu.Unlock()
 		}
-		r.registersMu.Unlock()
 	}
 }
 
