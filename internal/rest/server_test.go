@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/burgrp/reg/pkg/registry"
+	"github.com/burgrp/reg/internal/registry"
 )
 
 func newTestServer() *Server {

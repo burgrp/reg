@@ -8,8 +8,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/burgrp/reg/pkg/registry"
-	"github.com/burgrp/reg/pkg/rest"
+	"github.com/burgrp/reg/internal/registry"
+	"github.com/burgrp/reg/internal/rest"
 	"github.com/lmittmann/tint"
 	"github.com/spf13/cobra"
 	"golang.org/x/sync/errgroup"

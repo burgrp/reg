@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/burgrp/reg/pkg/registry"
+	"github.com/burgrp/reg/internal/registry"
 	"golang.org/x/sync/errgroup"
 )
 
