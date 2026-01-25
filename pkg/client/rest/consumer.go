@@ -2,6 +2,7 @@ package rest
 
 import (
 	"context"
+	"reflect"
 	"time"
 
 	"github.com/burgrp/reg/pkg/client"
@@ -32,8 +33,24 @@ func (c *Client) Consume(ctx context.Context, name string) (<-chan client.ValueA
 			if reg, exists := registers[name]; exists {
 				sub.wg.Add(1)
 				defer sub.wg.Done()
+
+				// Deep copy metadata to avoid shared references
+				var metadataCopy map[string]any
+				if reg.Metadata != nil {
+					metadataCopy = make(map[string]any, len(reg.Metadata))
+					for k, v := range reg.Metadata {
+						metadataCopy[k] = v
+					}
+				}
+
+				// Track the value we're sending
+				c.consumerMu.Lock()
+				sub.lastValue = reg.Value
+				sub.lastMetadata = metadataCopy
+				c.consumerMu.Unlock()
+
 				select {
-				case sub.values <- client.ValueAndMetadata{Value: reg.Value, Metadata: reg.Metadata}:
+				case sub.values <- client.ValueAndMetadata{Value: reg.Value, Metadata: metadataCopy}:
 				case <-ctx.Done():
 				}
 			}
@@ -101,15 +118,32 @@ func (c *Client) consumerBatchPoller(ctx context.Context) {
 		c.consumerMu.Lock()
 		for name, reg := range registers {
 			if sub, exists := c.consumerSubs[name]; exists {
-				sub.wg.Add(1)
-				go func(s *consumerSubscription, val client.ValueAndMetadata) {
-					defer s.wg.Done()
-					select {
-					case s.values <- val:
-					default:
-						// Channel full, skip
+				// Only send if value or metadata actually changed
+				valueChanged := !reflect.DeepEqual(sub.lastValue, reg.Value)
+				metadataChanged := !reflect.DeepEqual(sub.lastMetadata, reg.Metadata)
+
+				if valueChanged || metadataChanged {
+					// Deep copy metadata to avoid shared references
+					var metadataCopy map[string]any
+					if reg.Metadata != nil {
+						metadataCopy = make(map[string]any, len(reg.Metadata))
+						for k, v := range reg.Metadata {
+							metadataCopy[k] = v
+						}
 					}
-				}(sub, client.ValueAndMetadata{Value: reg.Value, Metadata: reg.Metadata})
+
+					sub.lastValue = reg.Value
+					sub.lastMetadata = metadataCopy
+					sub.wg.Add(1)
+					go func(s *consumerSubscription, val client.ValueAndMetadata) {
+						defer s.wg.Done()
+						select {
+						case s.values <- val:
+						default:
+							// Channel full, skip
+						}
+					}(sub, client.ValueAndMetadata{Value: reg.Value, Metadata: metadataCopy})
+				}
 			}
 		}
 		c.consumerMu.Unlock()

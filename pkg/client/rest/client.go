@@ -29,9 +29,11 @@ type Client struct {
 }
 
 type consumerSubscription struct {
-	values   chan client.ValueAndMetadata
-	requests chan any
-	wg       sync.WaitGroup // tracks active senders to channels
+	values       chan client.ValueAndMetadata
+	requests     chan any
+	wg           sync.WaitGroup // tracks active senders to channels
+	lastValue    any
+	lastMetadata map[string]any
 }
 
 type providerSubscription struct {
