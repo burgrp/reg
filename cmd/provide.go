@@ -76,6 +76,7 @@ func runProvide(args []string, ttl time.Duration, readOnly bool) error {
 	go func() {
 		for req := range changeRequests {
 			if !readOnly {
+				fmt.Println(req)
 				updates <- req
 			}
 		}
