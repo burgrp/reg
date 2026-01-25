@@ -16,6 +16,12 @@ type Client interface {
 	// Both channels are closed when the context is cancelled.
 	Consume(ctx context.Context, name string) (<-chan ValueAndMetadata, chan<- any, error)
 
+	// ConsumeAll subscribes to all registers and returns a channel for reading updates.
+	// The channel immediately receives current values for all existing registers,
+	// then continuously polls for any updates using long-polling.
+	// The channel is closed when the context is cancelled.
+	ConsumeAll(ctx context.Context) (<-chan RegisterUpdate, error)
+
 	// Provide publishes a register with initial value, metadata, and TTL, returning channels
 	// for updates and change requests.
 	// The updates channel allows sending new values (metadata and TTL remain from initial call).
@@ -27,6 +33,13 @@ type Client interface {
 
 // ValueAndMetadata represents a register value with its associated metadata
 type ValueAndMetadata struct {
+	Value    any
+	Metadata map[string]any
+}
+
+// RegisterUpdate represents an update to a register (used by ConsumeAll)
+type RegisterUpdate struct {
+	Name     string
 	Value    any
 	Metadata map[string]any
 }
