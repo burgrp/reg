@@ -34,8 +34,8 @@ Examples:
 		},
 	}
 
-	cmd.Flags().DurationVarP(&ttl, "ttl", "t", 5*time.Second, "Time to live for the register")
-	cmd.Flags().BoolVarP(&readOnly, "read-only", "r", false, "Run in read-only register")
+	cmd.Flags().DurationVarP(&ttl, "ttl", "t", 5*time.Second, "time to live")
+	cmd.Flags().BoolVarP(&readOnly, "read-only", "r", false, "read-only register")
 	return cmd
 }
 
