@@ -89,14 +89,13 @@ func runProvide(args []string, ttl time.Duration, readOnly bool) error {
 	scanner := bufio.NewScanner(os.Stdin)
 	for scanner.Scan() {
 		line := scanner.Text()
-		if line == "" {
-			continue
-		}
 
 		var newValue any
-		if err := json.Unmarshal([]byte(line), &newValue); err != nil {
-			fmt.Fprintf(os.Stderr, "Invalid JSON input: %v\n", err)
-			continue
+		if line != "" {
+			if err := json.Unmarshal([]byte(line), &newValue); err != nil {
+				fmt.Fprintf(os.Stderr, "Invalid JSON input: %v\n", err)
+				continue
+			}
 		}
 
 		updates <- newValue
