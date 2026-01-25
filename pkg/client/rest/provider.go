@@ -41,10 +41,15 @@ func (c *Client) Provide(ctx context.Context, name string, value any, metadata m
 		<-ctx.Done()
 		c.providerMu.Lock()
 		delete(c.providerSubs, name)
+		c.providerMu.Unlock()
+
+		// Wait for all active senders to finish before closing channels
+		sub.wg.Wait()
 		close(sub.updates)
 		close(sub.changeRequests)
 
 		// Stop batch poller if no more subscriptions
+		c.providerMu.Lock()
 		if len(c.providerSubs) == 0 && c.providerBatchCxl != nil {
 			c.providerBatchCxl()
 			c.providerBatchCtx = nil
@@ -89,15 +94,15 @@ func (c *Client) providerBatchPoller(ctx context.Context) {
 		c.providerMu.Lock()
 		for name, value := range requests {
 			if sub, exists := c.providerSubs[name]; exists {
-				// Protected send to handle race with channel closure
-				func() {
-					defer recover()
+				sub.wg.Add(1)
+				go func(s *providerSubscription, val any) {
+					defer s.wg.Done()
 					select {
-					case sub.changeRequests <- value:
+					case s.changeRequests <- val:
 					default:
 						// Channel full, skip
 					}
-				}()
+				}(sub, value)
 			}
 		}
 		c.providerMu.Unlock()

@@ -27,13 +27,11 @@ func (c *Client) Consume(ctx context.Context, name string) (<-chan client.ValueA
 
 	// Get initial value (no-wait)
 	go func() {
-		defer func() {
-			// Recover from panic if channel is closed due to context cancellation race
-			recover()
-		}()
 		registers, err := c.consumerClient.GetRegisters(ctx, []string{name}, 0)
 		if err == nil {
 			if reg, exists := registers[name]; exists {
+				sub.wg.Add(1)
+				defer sub.wg.Done()
 				select {
 				case sub.values <- client.ValueAndMetadata{Value: reg.Value, Metadata: reg.Metadata}:
 				case <-ctx.Done():
@@ -50,10 +48,15 @@ func (c *Client) Consume(ctx context.Context, name string) (<-chan client.ValueA
 		<-ctx.Done()
 		c.consumerMu.Lock()
 		delete(c.consumerSubs, name)
+		c.consumerMu.Unlock()
+
+		// Wait for all active senders to finish before closing channels
+		sub.wg.Wait()
 		close(sub.values)
 		close(sub.requests)
 
 		// Stop batch poller if no more subscriptions
+		c.consumerMu.Lock()
 		if len(c.consumerSubs) == 0 && c.consumerBatchCxl != nil {
 			c.consumerBatchCxl()
 			c.consumerBatchCtx = nil
@@ -98,15 +101,15 @@ func (c *Client) consumerBatchPoller(ctx context.Context) {
 		c.consumerMu.Lock()
 		for name, reg := range registers {
 			if sub, exists := c.consumerSubs[name]; exists {
-				// Protected send to handle race with channel closure
-				func() {
-					defer recover()
+				sub.wg.Add(1)
+				go func(s *consumerSubscription, val client.ValueAndMetadata) {
+					defer s.wg.Done()
 					select {
-					case sub.values <- client.ValueAndMetadata{Value: reg.Value, Metadata: reg.Metadata}:
+					case s.values <- val:
 					default:
 						// Channel full, skip
 					}
-				}()
+				}(sub, client.ValueAndMetadata{Value: reg.Value, Metadata: reg.Metadata})
 			}
 		}
 		c.consumerMu.Unlock()

@@ -31,6 +31,7 @@ type Client struct {
 type consumerSubscription struct {
 	values   chan client.ValueAndMetadata
 	requests chan any
+	wg       sync.WaitGroup // tracks active senders to channels
 }
 
 type providerSubscription struct {
@@ -40,6 +41,7 @@ type providerSubscription struct {
 	ttl          time.Duration
 	updates      chan any
 	changeRequests chan any
+	wg             sync.WaitGroup // tracks active senders to channels
 }
 
 // NewClient creates a new REST-based registry client with a default HTTP client

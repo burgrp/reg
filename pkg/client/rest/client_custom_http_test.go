@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -48,12 +49,12 @@ func TestNewClientWithHTTPClient(t *testing.T) {
 }
 
 func TestSharedHTTPClient(t *testing.T) {
-	consumerRequests := 0
-	providerRequests := 0
+	var consumerRequests atomic.Int32
+	var providerRequests atomic.Int32
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/consumer" {
-			consumerRequests++
+			consumerRequests.Add(1)
 			response := rest.ConsumerGetResponse{
 				Registers: map[string]rest.ConsumerGetRegister{
 					"temp": {Value: 25.5},
@@ -61,7 +62,7 @@ func TestSharedHTTPClient(t *testing.T) {
 			}
 			json.NewEncoder(w).Encode(response)
 		} else if r.URL.Path == "/provider" {
-			providerRequests++
+			providerRequests.Add(1)
 			if r.Method == http.MethodPut {
 				w.WriteHeader(http.StatusNoContent)
 			} else {
@@ -91,10 +92,10 @@ func TestSharedHTTPClient(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 
 	// Both should have made requests (verifies shared client works)
-	if consumerRequests == 0 {
+	if consumerRequests.Load() == 0 {
 		t.Error("Expected consumer requests")
 	}
-	if providerRequests == 0 {
+	if providerRequests.Load() == 0 {
 		t.Error("Expected provider requests")
 	}
 }
