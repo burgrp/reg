@@ -89,11 +89,15 @@ func (c *Client) providerBatchPoller(ctx context.Context) {
 		c.providerMu.Lock()
 		for name, value := range requests {
 			if sub, exists := c.providerSubs[name]; exists {
-				select {
-				case sub.changeRequests <- value:
-				default:
-					// Channel full, skip
-				}
+				// Protected send to handle race with channel closure
+				func() {
+					defer recover()
+					select {
+					case sub.changeRequests <- value:
+					default:
+						// Channel full, skip
+					}
+				}()
 			}
 		}
 		c.providerMu.Unlock()

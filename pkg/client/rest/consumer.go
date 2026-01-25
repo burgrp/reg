@@ -27,6 +27,10 @@ func (c *Client) Consume(ctx context.Context, name string) (<-chan client.ValueA
 
 	// Get initial value (no-wait)
 	go func() {
+		defer func() {
+			// Recover from panic if channel is closed due to context cancellation race
+			recover()
+		}()
 		registers, err := c.consumerClient.GetRegisters(ctx, []string{name}, 0)
 		if err == nil {
 			if reg, exists := registers[name]; exists {
@@ -94,11 +98,15 @@ func (c *Client) consumerBatchPoller(ctx context.Context) {
 		c.consumerMu.Lock()
 		for name, reg := range registers {
 			if sub, exists := c.consumerSubs[name]; exists {
-				select {
-				case sub.values <- client.ValueAndMetadata{Value: reg.Value, Metadata: reg.Metadata}:
-				default:
-					// Channel full, skip
-				}
+				// Protected send to handle race with channel closure
+				func() {
+					defer recover()
+					select {
+					case sub.values <- client.ValueAndMetadata{Value: reg.Value, Metadata: reg.Metadata}:
+					default:
+						// Channel full, skip
+					}
+				}()
 			}
 		}
 		c.consumerMu.Unlock()
