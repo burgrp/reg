@@ -2,6 +2,7 @@ package registry
 
 import (
 	"log/slog"
+	"reflect"
 	"slices"
 	"sync"
 	"time"
@@ -157,7 +158,7 @@ func (r *Registry) SetRegister(name string, value any, metadata Metadata, ttl ti
 	}
 	reg.ttl = time.Now().Add(ttl)
 
-	if reg.Value != value {
+	if !reflect.DeepEqual(reg.Value, value) {
 		reg.Value = value
 		r.logger.Debug("register changed", "name", name, "value", value, "ttl", ttl)
 		r.valueChangeListeners.Notify(name)
