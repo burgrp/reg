@@ -24,7 +24,10 @@ Reads new values from stdin (one JSON value per line) and writes change requests
 
 Value and metadata must be valid JSON. If not provided, defaults to null and {}.
 
+Requires REGISTRY environment variable to be set (e.g., http://localhost:8080).
+
 Examples:
+  export REGISTRY=http://localhost:8080
   reg provide temp
   reg provide temp 25.5
   reg provide temp 25.5 '{"unit":"celsius"}'`,

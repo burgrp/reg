@@ -22,13 +22,16 @@ func newGetCmd() *cobra.Command {
 Outputs register values to stdout. For a single register, outputs just the value.
 For multiple registers, outputs in "name=value" format.
 
-With -m flag, includes metadata in the output.
+With --metadata flag, includes metadata in the output.
 With --stay flag, continues running and outputs updates as they arrive.
 
+Requires REGISTRY environment variable to be set (e.g., http://localhost:8080).
+
 Examples:
+  export REGISTRY=http://localhost:8080
   reg get temp
   reg get temp humidity pressure
-  reg get temp -m
+  reg get temp --metadata
   reg get temp --stay`,
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -37,7 +40,7 @@ Examples:
 	}
 
 	cmd.Flags().BoolVarP(&withMetadata, "metadata", "m", false, "include metadata in output")
-	cmd.Flags().BoolVar(&stay, "stay", false, "stay running and output updates")
+	cmd.Flags().BoolVarP(&stay, "stay", "s", false, "stay running and output updates")
 	return cmd
 }
 
