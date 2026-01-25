@@ -27,8 +27,7 @@ Value and metadata must be valid JSON. If not provided, defaults to null and {}.
 Examples:
   reg provide temp
   reg provide temp 25.5
-  reg provide temp 25.5 '{"unit":"celsius"}'
-  echo '30.0' | reg provide temp 25.5 '{"unit":"celsius"}'`,
+  reg provide temp 25.5 '{"unit":"celsius"}'`,
 		Args: cobra.RangeArgs(1, 3),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runProvide(args, ttl, readOnly)
