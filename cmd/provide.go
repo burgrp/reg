@@ -14,6 +14,7 @@ import (
 
 func newProvideCmd() *cobra.Command {
 	var ttl time.Duration
+	var readOnly bool
 
 	cmd := &cobra.Command{
 		Use:   "provide <name> [value] [metadata]",
@@ -30,16 +31,16 @@ Examples:
   echo '30.0' | reg provide temp 25.5 '{"unit":"celsius"}'`,
 		Args: cobra.RangeArgs(1, 3),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runProvide(args, ttl)
+			return runProvide(args, ttl, readOnly)
 		},
 	}
 
 	cmd.Flags().DurationVarP(&ttl, "ttl", "t", 5*time.Second, "Time to live for the register")
-
+	cmd.Flags().BoolVarP(&readOnly, "read-only", "r", false, "Run in read-only register")
 	return cmd
 }
 
-func runProvide(args []string, ttl time.Duration) error {
+func runProvide(args []string, ttl time.Duration, readOnly bool) error {
 	name := args[0]
 
 	// Parse initial value (default: null)
@@ -72,19 +73,12 @@ func runProvide(args []string, ttl time.Duration) error {
 		return fmt.Errorf("failed to provide register: %w", err)
 	}
 
-	fmt.Fprintf(os.Stderr, "Providing register '%s' with value %v, metadata %v, TTL %v\n", name, value, metadata, ttl)
-	fmt.Fprintln(os.Stderr, "Reading new values from stdin (one JSON value per line)...")
-	fmt.Fprintln(os.Stderr, "Writing change requests to stdout...")
-
 	// Handle change requests (write to stdout)
 	go func() {
 		for req := range changeRequests {
-			jsonBytes, err := json.Marshal(req)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "Error marshaling change request: %v\n", err)
-				continue
+			if !readOnly {
+				updates <- req
 			}
-			fmt.Println(string(jsonBytes))
 		}
 	}()
 
@@ -103,7 +97,6 @@ func runProvide(args []string, ttl time.Duration) error {
 		}
 
 		updates <- newValue
-		fmt.Fprintf(os.Stderr, "Updated register '%s' to: %v\n", name, newValue)
 	}
 
 	if err := scanner.Err(); err != nil {

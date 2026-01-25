@@ -12,20 +12,17 @@ func (c *Client) Provide(ctx context.Context, name string, value any, metadata m
 
 	// Create subscription
 	sub := &providerSubscription{
-		name:         name,
-		currentValue: value,
-		metadata:     metadata,
-		ttl:          ttl,
-		updates:      make(chan any, 1),
+		name:           name,
+		currentValue:   value,
+		metadata:       metadata,
+		ttl:            ttl,
+		updates:        make(chan any, 1),
 		changeRequests: make(chan any, 1),
 	}
 	c.providerSubs[name] = sub
 
 	// Set initial value
-	err := c.providerClient.SetRegister(ctx, name, value, metadata, ttl)
-	if err != nil {
-		return nil, nil, err
-	}
+	c.providerClient.SetRegister(ctx, name, value, metadata, ttl) // Ignore error for initial set
 
 	// Start batch poller if not running
 	if c.providerBatchCtx == nil {
