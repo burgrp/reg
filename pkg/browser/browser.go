@@ -24,6 +24,8 @@ type Browser struct {
 	showMetadata bool
 	editing      bool
 	editingReg   string
+	filtering    bool
+	filterTerm   string
 
 	// UI components
 	mainFlex     *tview.Flex
@@ -33,6 +35,7 @@ type Browser struct {
 	metadataView *tview.TextView
 	statusBar    *tview.TextView
 	editInput    *tview.InputField
+	filterInput  *tview.InputField
 	editOverlay  *tview.Flex
 }
 
@@ -77,11 +80,10 @@ func (b *Browser) setupUI() {
 	b.listTable.SetTitleAlign(tview.AlignLeft)
 	b.listTable.SetBorderColor(tcell.ColorTeal)
 	b.listTable.SetTitleColor(tcell.ColorYellow)
-	b.listTable.SetBackgroundColor(tcell.ColorBlack)
+	b.listTable.SetBackgroundColor(tcell.ColorDarkBlue)
 	b.listTable.SetSelectedStyle(tcell.Style{}.
 		Background(tcell.ColorTeal).
-		Foreground(tcell.ColorBlack).
-		Attributes(tcell.AttrBold))
+		Foreground(tcell.ColorDarkBlue))
 	b.listTable.SetBorderAttributes(tcell.AttrNone)
 	b.updateListTable()
 
@@ -91,19 +93,20 @@ func (b *Browser) setupUI() {
 		SetRoot(rootNode).
 		SetCurrentNode(rootNode).
 		SetTopLevel(1)
-	b.treeView.SetBackgroundColor(tcell.ColorBlack)
+	b.treeView.SetBackgroundColor(tcell.ColorDarkBlue)
 	b.treeView.SetBorder(true)
 	b.treeView.SetTitle(" Registers (Tree) ")
 	b.treeView.SetTitleAlign(tview.AlignLeft)
 	b.treeView.SetBorderColor(tcell.ColorTeal)
 	b.treeView.SetTitleColor(tcell.ColorYellow)
 	b.treeView.SetBorderAttributes(tcell.AttrNone)
+	b.treeView.SetGraphicsColor(tcell.ColorTeal)
 
 	// Metadata view
 	b.metadataView = tview.NewTextView().
 		SetDynamicColors(true).
 		SetWordWrap(true)
-	b.metadataView.SetBackgroundColor(tcell.ColorBlack)
+	b.metadataView.SetBackgroundColor(tcell.ColorDarkBlue)
 	b.metadataView.SetBorder(true)
 	b.metadataView.SetTitle(" Details ")
 	b.metadataView.SetTitleAlign(tview.AlignLeft)
@@ -121,11 +124,10 @@ func (b *Browser) setupUI() {
 
 	// Edit input field (inline editor)
 	b.editInput = tview.NewInputField().
-		SetLabel("").
 		SetFieldWidth(0).
-		SetFieldBackgroundColor(tcell.ColorBlack).
-		SetFieldTextColor(tcell.ColorWhite).
-		SetLabelColor(tcell.ColorYellow).
+		SetFieldBackgroundColor(tcell.ColorTeal).
+		SetFieldTextColor(tcell.ColorBlack).
+		SetLabelColor(tcell.ColorBlack).
 		SetDoneFunc(func(key tcell.Key) {
 			if key == tcell.KeyEnter {
 				b.submitEdit()
@@ -133,11 +135,32 @@ func (b *Browser) setupUI() {
 				b.cancelEdit()
 			}
 		})
-	b.editInput.SetBackgroundColor(tcell.ColorBlack)
+	b.editInput.SetBackgroundColor(tcell.ColorSilver)
 	b.editInput.SetBorder(true)
-	b.editInput.SetBorderColor(tcell.ColorYellow)
-	b.editInput.SetTitle(" Edit Value ")
+	b.editInput.SetBorderColor(tcell.ColorBlack)
+	b.editInput.SetTitle(" Edit Value (JSON) ")
 	b.editInput.SetBorderAttributes(tcell.AttrNone)
+	b.editInput.SetTitleColor(tcell.ColorDarkBlue)
+
+	// Filter input field
+	b.filterInput = tview.NewInputField().
+		SetFieldWidth(0).
+		SetFieldBackgroundColor(tcell.ColorTeal).
+		SetFieldTextColor(tcell.ColorBlack).
+		SetLabelColor(tcell.ColorBlack).
+		SetDoneFunc(func(key tcell.Key) {
+			if key == tcell.KeyEnter {
+				b.submitFilter()
+			} else if key == tcell.KeyEscape {
+				b.cancelFilter()
+			}
+		})
+	b.filterInput.SetBackgroundColor(tcell.ColorSilver)
+	b.filterInput.SetBorder(true)
+	b.filterInput.SetBorderColor(tcell.ColorBlack)
+	b.filterInput.SetTitle(" Filter (name contains) ")
+	b.filterInput.SetBorderAttributes(tcell.AttrNone)
+	b.filterInput.SetTitleColor(tcell.ColorDarkBlue)
 
 	// Main flex layout
 	b.mainFlex = tview.NewFlex().SetDirection(tview.FlexRow)
@@ -160,22 +183,6 @@ func (b *Browser) setupUI() {
 	tview.Styles.PrimitiveBackgroundColor = tcell.ColorBlack
 }
 
-/*
- Attributes:
-  - b - bold
-  - i - italic
-  - u - underline
-  - d - dim
-
-  Reset codes:
-  - [-] - reset foreground only
-  - [-:-] - reset foreground and background
-  - [-::-] - reset everything (color + attributes)
-
-  Color names:
-  Color names match tcell color names: black, white, red, green, blue, yellow, cyan, magenta, gray, teal, etc.
-*/
-
 func (b *Browser) updateStatusBar() {
 	hotKeys := map[bool][]struct {
 		key    string
@@ -183,6 +190,7 @@ func (b *Browser) updateStatusBar() {
 	}{
 		true: {
 			{"m", "Meta"},
+			{"f", "Filter"},
 			{"↵", "Edit"},
 			{"t", "Flat"},
 			{"e", "ExpandAll"},
@@ -191,6 +199,7 @@ func (b *Browser) updateStatusBar() {
 		},
 		false: {
 			{"m", "Meta"},
+			{"f", "Filter"},
 			{"↵", "Edit"},
 			{"t", "Tree"},
 			{"q", "Quit"},
@@ -203,18 +212,12 @@ func (b *Browser) updateStatusBar() {
 		parts = append(parts, fmt.Sprintf("[white:black:b]%s [black:teal:-] %s [-:-:-]", hotKey.key, hotKey.action))
 	}
 	b.statusBar.SetText(strings.Join(parts, "  "))
-
-	// if b.treeMode {
-	// 	b.statusBar.SetText("[black::b]t[-::-]Flat  [black::b]m[-::-]Meta  [black::b]e[-::-]ExpandAll  [black::b]c[-::-]CollapseAll  [black::b]Enter[-::-]Edit                    [black::b]q[-::-]Quit")
-	// } else {
-	// 	b.statusBar.SetText("[white:black:b]t[black:teal:-] Tree [white:black:b]  m[-::-]Meta  [black::b]Enter[-::-]Edit [black::b]q[-::-]Quit")
-	// }
 }
 
 func (b *Browser) setupKeyBindings() {
 	b.app.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
-		// Don't intercept events while editing
-		if b.editing {
+		// Don't intercept events while editing or filtering
+		if b.editing || b.filtering {
 			return event
 		}
 
@@ -224,6 +227,9 @@ func (b *Browser) setupKeyBindings() {
 			return nil
 		case 'm', 'M':
 			b.toggleMetadata()
+			return nil
+		case 'f', 'F':
+			b.openFilter()
 			return nil
 		case 'e', 'E':
 			if b.treeMode {
@@ -239,7 +245,7 @@ func (b *Browser) setupKeyBindings() {
 			b.app.Stop()
 			return nil
 		}
-		if event.Key() == tcell.KeyEnter {
+		if event.Key() == tcell.KeyEnter || event.Rune() == ' ' {
 			// In tree mode, Enter can expand OR edit
 			if b.treeMode {
 				node := b.treeView.GetCurrentNode()
@@ -286,18 +292,22 @@ func (b *Browser) updateListTable() {
 	// Header
 	b.listTable.SetCell(0, 0, tview.NewTableCell("Name").
 		SetTextColor(tcell.ColorYellow).
-		SetBackgroundColor(tcell.ColorBlack).
+		SetBackgroundColor(tcell.ColorDarkBlue).
 		SetAttributes(tcell.AttrBold).
 		SetSelectable(false))
 	b.listTable.SetCell(0, 1, tview.NewTableCell("Value").
 		SetTextColor(tcell.ColorYellow).
-		SetBackgroundColor(tcell.ColorBlack).
+		SetBackgroundColor(tcell.ColorDarkBlue).
 		SetAttributes(tcell.AttrBold).
 		SetSelectable(false))
 
 	// Get sorted register names
 	names := make([]string, 0, len(b.registers))
 	for name := range b.registers {
+		// Apply filter if set
+		if b.filterTerm != "" && !strings.Contains(name, b.filterTerm) {
+			continue
+		}
 		names = append(names, name)
 	}
 	sort.Strings(names)
@@ -309,7 +319,7 @@ func (b *Browser) updateListTable() {
 
 		b.listTable.SetCell(row, 0, tview.NewTableCell(name).
 			SetTextColor(tcell.ColorWhite).
-			SetBackgroundColor(tcell.ColorBlack).
+			SetBackgroundColor(tcell.ColorDarkBlue).
 			SetReference(name))
 
 		// Format value as JSON
@@ -325,7 +335,7 @@ func (b *Browser) updateListTable() {
 		}
 		b.listTable.SetCell(row, 1, tview.NewTableCell(valueStr).
 			SetTextColor(tcell.ColorWhite).
-			SetBackgroundColor(tcell.ColorBlack))
+			SetBackgroundColor(tcell.ColorDarkBlue))
 	}
 }
 
@@ -341,6 +351,11 @@ func (b *Browser) updateTreeView() {
 	rootTree := &TreeNode{Children: make(map[string]*TreeNode)}
 
 	for name, reg := range b.registers {
+		// Apply filter if set
+		if b.filterTerm != "" && !strings.Contains(name, b.filterTerm) {
+			continue
+		}
+
 		parts := strings.Split(name, ".")
 		current := rootTree
 
@@ -377,6 +392,7 @@ func (b *Browser) buildTreeNodes(parent *tview.TreeNode, tree *TreeNode) {
 		child := tree.Children[key]
 		node := tview.NewTreeNode(key)
 		node.SetSelectable(true)
+		node.SetTextStyle(tcell.Style{}.Background(tcell.ColorDarkBlue))
 
 		if child.Register != nil {
 			// Leaf node (actual register)
@@ -391,12 +407,12 @@ func (b *Browser) buildTreeNodes(parent *tview.TreeNode, tree *TreeNode) {
 			if len(valueStr) > 30 {
 				valueStr = valueStr[:27] + "..."
 			}
-			node.SetText(fmt.Sprintf("%s: [green]%s[-]", key, valueStr))
+			node.SetText(fmt.Sprintf("%s[yellow:darkblue] %s[-:-]", key, valueStr))
 			node.SetColor(tcell.ColorWhite)
 			node.SetReference(child.Register.Name)
 		} else {
 			// Intermediate node (folder)
-			node.SetColor(tcell.ColorTeal)
+			node.SetColor(tcell.ColorSilver)
 			node.SetSelectable(true)
 			node.SetExpanded(true) // Start fully expanded
 			// Add children first
@@ -587,6 +603,19 @@ func (b *Browser) editRegister() {
 		return
 	}
 
+	// Special case: if value is boolean, just toggle it
+	if boolVal, ok := reg.Value.(bool); ok {
+		newValue := !boolVal
+		go func() {
+			_, requests, err := b.client.Consume(b.ctx, regName)
+			if err != nil {
+				return
+			}
+			requests <- newValue
+		}()
+		return
+	}
+
 	// Start editing mode
 	b.editing = true
 	b.editingReg = regName
@@ -600,25 +629,6 @@ func (b *Browser) editRegister() {
 		currentValue = string(valueBytes)
 	}
 	b.editInput.SetText(currentValue)
-
-	if b.treeMode {
-		// In tree mode, mark the node as being edited
-		node := b.treeView.GetCurrentNode()
-		if node != nil {
-			// Change node text to show editing
-			key := ""
-			if ref := node.GetReference(); ref != nil {
-				parts := strings.Split(ref.(string), ".")
-				key = parts[len(parts)-1]
-			}
-			node.SetText(fmt.Sprintf("%s: [yellow][EDITING][-]", key))
-		}
-	} else {
-		// In flat mode, change the value cell to show editing
-		if row > 0 {
-			b.listTable.GetCell(row, 1).SetText("[yellow][EDITING][-]")
-		}
-	}
 
 	// Create overlay with the edit input field
 	// Use a Grid to position it in the center
@@ -634,6 +644,30 @@ func (b *Browser) editRegister() {
 	b.app.SetFocus(b.editInput)
 }
 
+func (b *Browser) selectTreeNode(regName string) {
+	// Find and select the node with the given register name
+	root := b.treeView.GetRoot()
+	b.findAndSelectNode(root, regName)
+}
+
+func (b *Browser) findAndSelectNode(node *tview.TreeNode, regName string) bool {
+	// Check if this node is the one we're looking for
+	if ref := node.GetReference(); ref != nil {
+		if ref.(string) == regName {
+			b.treeView.SetCurrentNode(node)
+			return true
+		}
+	}
+
+	// Recursively search children
+	for _, child := range node.GetChildren() {
+		if b.findAndSelectNode(child, regName) {
+			return true
+		}
+	}
+	return false
+}
+
 func (b *Browser) submitEdit() {
 	if !b.editing {
 		return
@@ -644,9 +678,14 @@ func (b *Browser) submitEdit() {
 
 	// Try to parse as JSON
 	var parsedValue any
-	if err := json.Unmarshal([]byte(newValue), &parsedValue); err != nil {
-		// If it fails, treat as string
-		parsedValue = newValue
+
+	if newValue == "null" || newValue == "nil" {
+		parsedValue = nil
+	} else {
+		if err := json.Unmarshal([]byte(newValue), &parsedValue); err != nil {
+			// If it fails, treat as string
+			parsedValue = newValue
+		}
 	}
 
 	// Send change request
@@ -676,6 +715,8 @@ func (b *Browser) cancelEdit() {
 	// Restore original display
 	if b.treeMode {
 		b.updateTreeView()
+		// Re-select the edited register
+		b.selectTreeNode(regName)
 	} else {
 		// Restore the value in the table
 		b.registersMu.RLock()
@@ -711,6 +752,73 @@ func (b *Browser) cancelEdit() {
 	}
 }
 
+func (b *Browser) openFilter() {
+	if b.filtering {
+		return // Already filtering
+	}
+
+	// Start filtering mode
+	b.filtering = true
+
+	// Set current filter term in input field
+	b.filterInput.SetText(b.filterTerm)
+
+	// Create overlay with the filter input field
+	grid := tview.NewGrid().
+		SetColumns(0, 60, 0).
+		SetRows(0, 3, 0).
+		AddItem(b.filterInput, 1, 1, 1, 1, 0, 0, true)
+
+	grid.SetBackgroundColor(tcell.ColorDefault)
+
+	b.pages.AddPage("filter", grid, true, true)
+	b.app.SetFocus(b.filterInput)
+}
+
+func (b *Browser) submitFilter() {
+	if !b.filtering {
+		return
+	}
+
+	// Update filter term
+	b.filterTerm = b.filterInput.GetText()
+
+	// Remove filter overlay
+	b.pages.RemovePage("filter")
+	b.filtering = false
+
+	// Refresh display with new filter
+	if b.treeMode {
+		b.updateTreeView()
+	} else {
+		b.updateListTable()
+	}
+
+	// Return focus to register view
+	if b.treeMode {
+		b.app.SetFocus(b.treeView)
+	} else {
+		b.app.SetFocus(b.listTable)
+	}
+}
+
+func (b *Browser) cancelFilter() {
+	if !b.filtering {
+		return
+	}
+
+	// Remove filter overlay without changing filter term
+	b.pages.RemovePage("filter")
+	b.filtering = false
+
+	// Return focus to register view
+	if b.treeMode {
+		b.app.SetFocus(b.treeView)
+	} else {
+		b.app.SetFocus(b.listTable)
+	}
+}
+
 func (b *Browser) Run() error {
 	// Start consuming all registers
 	updates, err := b.client.ConsumeAll(b.ctx)
@@ -731,8 +839,20 @@ func (b *Browser) Run() error {
 
 			// Update UI on the main thread
 			b.app.QueueUpdateDraw(func() {
+				// Preserve current selection
+				var selectedReg string
 				if b.treeMode {
+					node := b.treeView.GetCurrentNode()
+					if node != nil {
+						if ref := node.GetReference(); ref != nil {
+							selectedReg = ref.(string)
+						}
+					}
 					b.updateTreeView()
+					// Re-select the same register
+					if selectedReg != "" {
+						b.selectTreeNode(selectedReg)
+					}
 				} else {
 					b.updateListTable()
 				}
