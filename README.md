@@ -4,10 +4,16 @@ A lightweight, IoT-focused service for managing named registers with dynamic val
 
 ## Overview
 
+A **register** is a named container that holds a current value, optional metadata, and a time-to-live (TTL). Think of it like a variable in memory that automatically expires if not refreshed. Each register has:
+- **Name** - Unique identifier (e.g., "living-room-temperature")
+- **Value** - Current data (any JSON type: number, string, object, array)
+- **Metadata** - Optional key-value pairs with additional information
+- **TTL** - How long the register stays valid without refresh
+
 Registry provides a simplified Provider/Consumer model where:
-- **Providers** publish named registers with values, metadata, and time-to-live (TTL)
-- **Consumers** read register values and request changes
-- **Automatic cleanup** removes expired registers based on TTL
+- **Providers** publish registers and keep them alive by refreshing before TTL expires
+- **Consumers** read register values and can request changes
+- **Automatic cleanup** removes expired registers when TTL elapses
 
 ## Architecture
 
