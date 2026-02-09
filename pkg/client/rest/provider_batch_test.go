@@ -46,7 +46,8 @@ func TestProviderBatchPolling(t *testing.T) {
 	defer server.Close()
 
 	client := NewClient(server.URL)
-	ctx, cancel := context.WithTimeout(context.Background(), 35*time.Second)
+	client.ProviderPollInterval = 500 * time.Millisecond // Fast polling for tests
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	// Provide three registers
@@ -66,8 +67,8 @@ func TestProviderBatchPolling(t *testing.T) {
 
 	initialCount := requestCount.Load()
 
-	// Wait for batch poller to run (30 seconds wait + some margin)
-	time.Sleep(32 * time.Second)
+	// Wait for batch poller to run
+	time.Sleep(1 * time.Second)
 
 	// Should have made at least one more request
 	finalCount := requestCount.Load()
@@ -131,8 +132,9 @@ func TestProviderBatchPolling_DynamicProviders(t *testing.T) {
 	defer server.Close()
 
 	client := NewClient(server.URL)
+	client.ProviderPollInterval = 500 * time.Millisecond // Fast polling for tests
 	ctx1, cancel1 := context.WithCancel(context.Background())
-	ctx2, cancel2 := context.WithTimeout(context.Background(), 35*time.Second)
+	ctx2, cancel2 := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel2()
 
 	// Provide two registers
@@ -140,7 +142,7 @@ func TestProviderBatchPolling_DynamicProviders(t *testing.T) {
 	_, changeReqs2, _ := client.Provide(ctx2, "humidity", 60.0, nil, 60*time.Second)
 
 	// Wait for batch poller to run
-	time.Sleep(32 * time.Second)
+	time.Sleep(1 * time.Second)
 
 	initialBatched := batchedRequests.Load()
 	if initialBatched == 0 {
@@ -152,7 +154,7 @@ func TestProviderBatchPolling_DynamicProviders(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 
 	// Continue with only one provider
-	time.Sleep(32 * time.Second)
+	time.Sleep(1 * time.Second)
 
 	// Verify second provider still receives change requests
 	select {

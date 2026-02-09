@@ -10,8 +10,11 @@ func (c *Client) Provide(ctx context.Context, name string, value any, metadata m
 	c.providerMu.Lock()
 	defer c.providerMu.Unlock()
 
-	// Create subscription
+	// Create subscription with its own context
+	subCtx, subCancel := context.WithCancel(context.Background())
 	sub := &providerSubscription{
+		ctx:            subCtx,
+		cancel:         subCancel,
 		name:           name,
 		currentValue:   value,
 		metadata:       metadata,
@@ -42,6 +45,9 @@ func (c *Client) Provide(ctx context.Context, name string, value any, metadata m
 		c.providerMu.Lock()
 		delete(c.providerSubs, name)
 		c.providerMu.Unlock()
+
+		// Cancel subscription context to signal senders to stop
+		sub.cancel()
 
 		// Wait for all active senders to finish before closing channels
 		sub.wg.Wait()
@@ -83,8 +89,12 @@ func (c *Client) providerBatchPoller(ctx context.Context) {
 		}
 		c.providerMu.Unlock()
 
-		// Long poll for change requests (30 seconds)
-		requests, err := c.providerClient.GetChangeRequests(ctx, names, 30*time.Second)
+		// Long poll for change requests
+		pollInterval := c.ProviderPollInterval
+		if pollInterval == 0 {
+			pollInterval = 30 * time.Second
+		}
+		requests, err := c.providerClient.GetChangeRequests(ctx, names, pollInterval)
 		if err != nil {
 			time.Sleep(1 * time.Second) // Back off on error
 			continue
@@ -99,6 +109,8 @@ func (c *Client) providerBatchPoller(ctx context.Context) {
 					defer s.wg.Done()
 					select {
 					case s.changeRequests <- val:
+					case <-s.ctx.Done():
+						// Subscription is being torn down, don't send
 					default:
 						// Channel full, skip
 					}

@@ -26,9 +26,15 @@ type Client struct {
 	providerSubs     map[string]*providerSubscription
 	providerBatchCtx context.Context
 	providerBatchCxl context.CancelFunc
+
+	// Polling intervals (configurable for testing)
+	ConsumerPollInterval time.Duration // defaults to 5s
+	ProviderPollInterval time.Duration // defaults to 30s
 }
 
 type consumerSubscription struct {
+	ctx          context.Context
+	cancel       context.CancelFunc
 	values       chan client.ValueAndMetadata
 	requests     chan any
 	wg           sync.WaitGroup // tracks active senders to channels
@@ -37,11 +43,13 @@ type consumerSubscription struct {
 }
 
 type providerSubscription struct {
-	name         string
-	currentValue any
-	metadata     map[string]any
-	ttl          time.Duration
-	updates      chan any
+	ctx            context.Context
+	cancel         context.CancelFunc
+	name           string
+	currentValue   any
+	metadata       map[string]any
+	ttl            time.Duration
+	updates        chan any
 	changeRequests chan any
 	wg             sync.WaitGroup // tracks active senders to channels
 }
@@ -55,9 +63,11 @@ func NewClient(baseURL string) *Client {
 // NewClientWithHTTPClient creates a new REST-based registry client with a custom HTTP client
 func NewClientWithHTTPClient(baseURL string, httpClient *http.Client) *Client {
 	return &Client{
-		consumerClient: rest.NewConsumerClientWithHTTPClient(baseURL, httpClient),
-		providerClient: rest.NewProviderClientWithHTTPClient(baseURL, httpClient),
-		consumerSubs:   make(map[string]*consumerSubscription),
-		providerSubs:   make(map[string]*providerSubscription),
+		consumerClient:       rest.NewConsumerClientWithHTTPClient(baseURL, httpClient),
+		providerClient:       rest.NewProviderClientWithHTTPClient(baseURL, httpClient),
+		consumerSubs:         make(map[string]*consumerSubscription),
+		providerSubs:         make(map[string]*providerSubscription),
+		ConsumerPollInterval: 5 * time.Second,  // default
+		ProviderPollInterval: 30 * time.Second, // default
 	}
 }

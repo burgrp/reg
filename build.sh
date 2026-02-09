@@ -10,6 +10,14 @@ VERSION=${GITHUB_REF#refs/tags/v}
 
 echo "Version $VERSION"
 
+echo "Running tests..."
+go test ./...
+if [ $? -ne 0 ]; then
+    echo >&2 "Tests failed"
+    exit 1
+fi
+echo "Tests passed"
+
 function build() {
     echo "Building $1"
     goos=${1%/*}

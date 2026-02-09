@@ -41,7 +41,8 @@ func TestConsumerBatchPolling(t *testing.T) {
 	defer server.Close()
 
 	client := NewClient(server.URL)
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	client.ConsumerPollInterval = 500 * time.Millisecond // Fast polling for tests
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	// Subscribe to three registers
@@ -58,6 +59,9 @@ func TestConsumerBatchPolling(t *testing.T) {
 	<-values2
 	<-values3
 
+	// Give a moment for all subscriptions to be fully registered
+	time.Sleep(100 * time.Millisecond)
+
 	// Clear the request names buffer
 	for len(lastRequestNames) > 0 {
 		<-lastRequestNames
@@ -65,8 +69,8 @@ func TestConsumerBatchPolling(t *testing.T) {
 
 	initialCount := requestCount.Load()
 
-	// Wait for batch poller to run (should be within 5 seconds + some margin)
-	time.Sleep(6 * time.Second)
+	// Wait for batch poller to run
+	time.Sleep(1 * time.Second)
 
 	// Should have made at least one more request
 	finalCount := requestCount.Load()
@@ -106,8 +110,9 @@ func TestConsumerBatchPolling_DynamicSubscriptions(t *testing.T) {
 	defer server.Close()
 
 	client := NewClient(server.URL)
+	client.ConsumerPollInterval = 500 * time.Millisecond // Fast polling for tests
 	ctx1, cancel1 := context.WithCancel(context.Background())
-	ctx2, cancel2 := context.WithTimeout(context.Background(), 8*time.Second)
+	ctx2, cancel2 := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel2()
 
 	// Subscribe to two registers
@@ -119,7 +124,7 @@ func TestConsumerBatchPolling_DynamicSubscriptions(t *testing.T) {
 	<-values2
 
 	// Wait for batch poller to run
-	time.Sleep(6 * time.Second)
+	time.Sleep(1 * time.Second)
 
 	initialBatched := batchedRequests.Load()
 	if initialBatched == 0 {
@@ -132,7 +137,7 @@ func TestConsumerBatchPolling_DynamicSubscriptions(t *testing.T) {
 
 	// Continue with only one subscription - should stop batching
 	// (though implementation may still send array with 1 name)
-	time.Sleep(6 * time.Second)
+	time.Sleep(1 * time.Second)
 
 	// Just verify no panics and second subscription still works
 	select {
