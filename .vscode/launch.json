@@ -20,7 +20,7 @@
             "program": "${workspaceFolder}",
             "args": ["browse"],
             "env": {
-                "REGISTRY": "http://localhost:8080"
+                // "REGISTRY": "http://localhost:8080"
             },
             "console": "externalTerminal"
         }

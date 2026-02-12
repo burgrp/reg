@@ -28,15 +28,17 @@ type Browser struct {
 	filterTerm   string
 
 	// UI components
-	mainFlex     *tview.Flex
-	pages        *tview.Pages
-	listTable    *tview.Table
-	treeView     *tview.TreeView
-	metadataView *tview.TextView
-	statusBar    *tview.TextView
-	editInput    *tview.InputField
-	filterInput  *tview.InputField
-	editOverlay  *tview.Flex
+	mainFlex      *tview.Flex
+	pages         *tview.Pages
+	listTable     *tview.Table
+	treeView      *tview.TreeView
+	metadataView  *tview.TextView
+	statusBar     *tview.TextView
+	editInput     *tview.InputField
+	filterInput   *tview.InputField
+	editOverlay   *tview.Flex
+	boolRadio     *tview.Form
+	boolSelection int // 0=true, 1=false, 2=null
 }
 
 type RegisterData struct {
@@ -241,10 +243,14 @@ func (b *Browser) setupKeyBindings() {
 				b.collapseAll()
 				return nil
 			}
-		case 'q', 'Q':
+		}
+
+		// Quit with Escape key
+		if event.Key() == tcell.KeyEscape {
 			b.app.Stop()
 			return nil
 		}
+
 		if event.Key() == tcell.KeyEnter || event.Rune() == ' ' {
 			// In tree mode, Enter can expand OR edit
 			if b.treeMode {
@@ -337,6 +343,13 @@ func (b *Browser) updateListTable() {
 			SetTextColor(tcell.ColorWhite).
 			SetBackgroundColor(tcell.ColorDarkBlue))
 	}
+
+	// Update title with count
+	title := fmt.Sprintf(" Registers (Flat) [%d] ", len(names))
+	if b.filterTerm != "" {
+		title = fmt.Sprintf(" Registers (Flat) [%d / %d total] ", len(names), len(b.registers))
+	}
+	b.listTable.SetTitle(title)
 }
 
 func (b *Browser) updateTreeView() {
@@ -350,11 +363,14 @@ func (b *Browser) updateTreeView() {
 	// Build hierarchical structure
 	rootTree := &TreeNode{Children: make(map[string]*TreeNode)}
 
+	// Count filtered registers
+	filteredCount := 0
 	for name, reg := range b.registers {
 		// Apply filter if set
 		if b.filterTerm != "" && !strings.Contains(name, b.filterTerm) {
 			continue
 		}
+		filteredCount++
 
 		parts := strings.Split(name, ".")
 		current := rootTree
@@ -374,7 +390,14 @@ func (b *Browser) updateTreeView() {
 	}
 
 	b.buildTreeNodes(root, rootTree)
-	b.treeView.SetRoot(root).SetCurrentNode(root)
+	b.treeView.SetRoot(root)
+
+	// Update title with count
+	title := fmt.Sprintf(" Registers (Tree) [%d] ", filteredCount)
+	if b.filterTerm != "" {
+		title = fmt.Sprintf(" Registers (Tree) [%d / %d total] ", filteredCount, len(b.registers))
+	}
+	b.treeView.SetTitle(title)
 }
 
 func (b *Browser) buildTreeNodes(parent *tview.TreeNode, tree *TreeNode) {
@@ -500,6 +523,7 @@ func (b *Browser) toggleTreeMode() {
 
 	if b.treeMode {
 		b.updateTreeView()
+		b.treeView.SetCurrentNode(b.treeView.GetRoot())
 		contentFlex.AddItem(b.treeView, 0, 7, true)
 		b.app.SetFocus(b.treeView)
 	} else {
@@ -603,16 +627,9 @@ func (b *Browser) editRegister() {
 		return
 	}
 
-	// Special case: if value is boolean, just toggle it
-	if boolVal, ok := reg.Value.(bool); ok {
-		newValue := !boolVal
-		go func() {
-			_, requests, err := b.client.Consume(b.ctx, regName)
-			if err != nil {
-				return
-			}
-			requests <- newValue
-		}()
+	// Special case: if value is boolean or null, show boolean dialog
+	if _, ok := reg.Value.(bool); ok || reg.Value == nil {
+		b.showBooleanDialog(regName, reg.Value)
 		return
 	}
 
@@ -642,6 +659,216 @@ func (b *Browser) editRegister() {
 
 	b.pages.AddPage("edit", grid, true, true)
 	b.app.SetFocus(b.editInput)
+}
+
+func (b *Browser) showBooleanDialog(regName string, currentValue any) {
+	if b.editing {
+		return // Already editing
+	}
+
+	b.editing = true
+	b.editingReg = regName
+
+	// Determine current selection
+	currentSelection := 2 // default to null
+	if currentValue != nil {
+		if boolVal, ok := currentValue.(bool); ok {
+			if boolVal {
+				currentSelection = 0 // true
+			} else {
+				currentSelection = 1 // false
+			}
+		}
+	}
+	b.boolSelection = currentSelection
+
+	// Create table with radio button style
+	table := tview.NewTable()
+	table.SetSelectable(true, false)
+	table.SetBackgroundColor(tcell.ColorSilver)
+	table.SetSelectedStyle(tcell.StyleDefault.Foreground(tcell.ColorBlack).Background(tcell.ColorTeal))
+	table.SetBorder(true)
+	table.SetTitle(fmt.Sprintf(" %s ", regName))
+	table.SetBorderColor(tcell.ColorBlack)
+	table.SetTitleColor(tcell.ColorDarkBlue)
+
+	// Add three rows with radio buttons
+	options := []string{"true", "false", "null"}
+	updateTable := func() {
+		for i, option := range options {
+			var text string
+			if i == b.boolSelection {
+				text = "(*) " + option
+			} else {
+				text = "( ) " + option
+			}
+			cell := tview.NewTableCell(text).
+				SetTextColor(tcell.ColorBlack).
+				SetBackgroundColor(tcell.ColorSilver).
+				SetAlign(tview.AlignLeft)
+
+			// Highlight selected row
+			if i == b.boolSelection {
+				cell.SetBackgroundColor(tcell.ColorTeal)
+			}
+
+			table.SetCell(i, 0, cell)
+		}
+	}
+	updateTable()
+
+	// Set initial selection
+	table.Select(currentSelection, 0)
+
+	// Handle selection change
+	table.SetSelectionChangedFunc(func(row, column int) {
+		b.boolSelection = row
+		updateTable()
+	})
+
+	// Handle Enter key to submit
+	table.SetSelectedFunc(func(row, column int) {
+		b.boolSelection = row
+		b.submitBooleanEdit()
+	})
+
+	// Handle Escape key to cancel
+	table.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+		if event.Key() == tcell.KeyEscape {
+			b.cancelBooleanEdit()
+			return nil
+		}
+		return event
+	})
+
+	// Use a Grid to position it in the center
+	grid := tview.NewGrid().
+		SetColumns(0, 30, 0).
+		SetRows(0, 5, 0).
+		AddItem(table, 1, 1, 1, 1, 0, 0, true)
+
+	grid.SetBackgroundColor(tcell.ColorDefault)
+
+	b.pages.AddPage("bool-edit", grid, true, true)
+	b.app.SetFocus(table)
+}
+
+func (b *Browser) submitBooleanEdit() {
+	if !b.editing {
+		return
+	}
+
+	regName := b.editingReg
+	var newValue any
+
+	switch b.boolSelection {
+	case 0:
+		newValue = true
+	case 1:
+		newValue = false
+	case 2:
+		newValue = nil
+	}
+
+	// Send change request
+	go func() {
+		_, requests, err := b.client.Consume(b.ctx, regName)
+		if err != nil {
+			return
+		}
+		requests <- newValue
+	}()
+
+	b.cancelBooleanEdit()
+}
+
+func (b *Browser) cancelBooleanEdit() {
+	if !b.editing {
+		return
+	}
+
+	// Remove dialog overlay
+	b.pages.RemovePage("bool-edit")
+
+	b.editing = false
+	b.editingReg = ""
+
+	// Return focus to register view
+	if b.treeMode {
+		b.app.SetFocus(b.treeView)
+	} else {
+		b.app.SetFocus(b.listTable)
+	}
+}
+
+// getNodePath returns the path from root to the given node as a slice of node texts
+func (b *Browser) getNodePath(node *tview.TreeNode) []string {
+	if node == nil {
+		return nil
+	}
+
+	var path []string
+	current := node
+
+	// Walk up to root, collecting node texts
+	for current != nil && current != b.treeView.GetRoot() {
+		path = append([]string{current.GetText()}, path...)
+
+		// Find parent by searching the entire tree
+		parent := b.findParent(b.treeView.GetRoot(), current)
+		current = parent
+	}
+
+	return path
+}
+
+// findParent finds the parent node of the given child node
+func (b *Browser) findParent(root *tview.TreeNode, child *tview.TreeNode) *tview.TreeNode {
+	if root == nil {
+		return nil
+	}
+
+	for _, c := range root.GetChildren() {
+		if c == child {
+			return root
+		}
+		if parent := b.findParent(c, child); parent != nil {
+			return parent
+		}
+	}
+	return nil
+}
+
+// selectNodeByPath selects a node by following the given path
+func (b *Browser) selectNodeByPath(path []string) bool {
+	if len(path) == 0 {
+		return false
+	}
+
+	current := b.treeView.GetRoot()
+
+	for _, text := range path {
+		found := false
+		for _, child := range current.GetChildren() {
+			// Extract just the node name part (before any value display)
+			childText := child.GetText()
+			// For leaf nodes, text is "name[yellow] value[-]", we need just the name part
+			nodeName := strings.Split(childText, "[")[0]
+			searchName := strings.Split(text, "[")[0]
+
+			if nodeName == searchName {
+				current = child
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false
+		}
+	}
+
+	b.treeView.SetCurrentNode(current)
+	return true
 }
 
 func (b *Browser) selectTreeNode(regName string) {
@@ -839,19 +1066,20 @@ func (b *Browser) Run() error {
 
 			// Update UI on the main thread
 			b.app.QueueUpdateDraw(func() {
-				// Preserve current selection
-				var selectedReg string
 				if b.treeMode {
+					// Preserve current node position by saving its path
+					var nodePath []string
 					node := b.treeView.GetCurrentNode()
-					if node != nil {
-						if ref := node.GetReference(); ref != nil {
-							selectedReg = ref.(string)
-						}
+					if node != nil && node != b.treeView.GetRoot() {
+						nodePath = b.getNodePath(node)
 					}
+
+					// Rebuild the tree
 					b.updateTreeView()
-					// Re-select the same register
-					if selectedReg != "" {
-						b.selectTreeNode(selectedReg)
+
+					// Restore the node position by path
+					if len(nodePath) > 0 {
+						b.selectNodeByPath(nodePath)
 					}
 				} else {
 					b.updateListTable()
