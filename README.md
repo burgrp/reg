@@ -104,6 +104,22 @@ export REGISTRY=http://localhost:8080
 ./reg browse
 ```
 
+#### MCP Server (Model Context Protocol)
+
+```bash
+# Start MCP stdio server for AI assistant integration
+export REGISTRY=http://localhost:8080
+./reg mcp
+
+# The MCP server exposes tools for AI assistants:
+# - get_register: Get register value and metadata
+# - set_register: Set register value (provider operation)
+# - list_registers: List all registers
+# - request_change: Request value change (consumer operation)
+```
+
+Use with MCP clients like Claude Desktop, Cline, or other MCP-compatible tools.
+
 ### Using the API
 
 #### Provide a Register (Provider)
@@ -164,6 +180,7 @@ curl -X PUT http://localhost:8080/consumer \
 
 - **Protocol-agnostic core** - Clean separation between business logic and transport
 - **REST API** - Simple HTTP interface with JSON
+- **MCP Server** - Model Context Protocol stdio server for AI assistant integration
 - **Long polling** - Efficient real-time updates without WebSockets
 - **Automatic TTL management** - Registers expire automatically if not refreshed
 - **Change requests** - Consumers can request value changes from providers

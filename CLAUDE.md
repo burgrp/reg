@@ -252,12 +252,63 @@ echo '30.0'
 
 Press Ctrl+C to stop providing (register expires after TTL).
 
+### `mcp` Command
+
+Starts an MCP (Model Context Protocol) stdio server for AI assistant integration:
+
+```bash
+export REGISTRY=http://localhost:8080
+./reg mcp
+```
+
+**Behavior:**
+- Requires `REGISTRY` environment variable (e.g., `http://localhost:8080`)
+- Communicates over stdin/stdout using JSON-RPC 2.0
+- Designed for use with MCP clients like Claude Desktop, Cline, etc.
+- Blocks indefinitely, processing JSON-RPC requests
+
+**MCP Tools Exposed:**
+
+1. **`get_register`** - Get a register's current value and metadata
+   - Input: `name` (string)
+   - Returns: Register value and metadata as text
+   - Uses `Consume()` to get current value
+
+2. **`set_register`** - Set a register's value (provider operation)
+   - Input: `name` (string), `value` (any JSON type), `metadata` (object, optional), `ttl` (string, default "5s")
+   - Returns: Confirmation message
+   - Uses `Provide()` to create/update register with TTL
+
+3. **`list_registers`** - List all registers with their values
+   - Input: None
+   - Returns: Formatted list of all registers with values and metadata
+   - Uses `ConsumeAll()` to get all current registers
+
+4. **`request_change`** - Request a value change (consumer operation)
+   - Input: `name` (string), `value` (any JSON type)
+   - Returns: Confirmation that request was sent
+   - Uses `Consume()` to send change request to provider
+
+**Implementation:**
+- Location: `cmd/mcp.go`
+- Uses official `github.com/modelcontextprotocol/go-sdk/mcp` library
+- Tool handlers use typed input structs with jsonschema tags for automatic schema generation
+- All tools return `*mcp.CallToolResult` with text content
+
+**Error Handling:**
+- Connection errors returned with `IsError: true` flag
+- Timeouts (100ms for get/list operations) treated as "not found"
+- Graceful handling of context cancellation
+
+Press Ctrl+C to stop the MCP server.
+
 ## Code Organization
 
 ```
 cmd/
   serve.go           - Serve command, signal handling, shutdown coordination
   provide.go         - Provide command, stdin/stdout interaction
+  mcp.go             - MCP stdio server command, AI assistant integration
   root.go            - Root command, subcommand registration
 pkg/
   client/
