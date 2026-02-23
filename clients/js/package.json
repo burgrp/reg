@@ -1,0 +1,19 @@
+{
+  "name": "@burgrp/reg",
+  "version": "1.0.0",
+  "description": "JavaScript client for the reg IoT registry",
+  "type": "module",
+  "main": "src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./wire": "./src/wire/index.js"
+  },
+  "scripts": {
+    "test": "node --test"
+  },
+  "author": "",
+  "license": "ISC",
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
