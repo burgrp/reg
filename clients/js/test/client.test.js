@@ -266,7 +266,7 @@ describe('Client', () => {
         providerPollInterval: 60000,
       })
 
-      const pub = await client.provide('temp', 21.5, { unit: 'celsius' }, '5s')
+      const pub = client.provide('temp', 21.5, { unit: 'celsius' }, '5s')
 
       assert.ok(pub)
       assert.equal(typeof pub.update, 'function')
@@ -303,7 +303,7 @@ describe('Client', () => {
         providerPollInterval: 60000,
       })
 
-      const pub = await client.provide('temp', 21.5, {}, '5s')
+      const pub = client.provide('temp', 21.5, {}, '5s')
       calls.length = 0 // clear initial call
 
       await pub.update(25.0)
@@ -327,7 +327,7 @@ describe('Client', () => {
       }
 
       const client = new Client('http://localhost:8080', { fetch: fetchFn, providerPollInterval: 60000 })
-      const pub = await client.provide('temp', 21.5, {}, '10s') // must not throw
+      const pub = client.provide('temp', 21.5, {}, '10s')
 
       assert.ok(pub)
       assert.equal(typeof pub.update, 'function')
@@ -357,7 +357,7 @@ describe('Client', () => {
       }
 
       const client = new Client('http://localhost:8080', { fetch: fetchFn, providerPollInterval: 60000 })
-      const pub = await client.provide('temp', 21.5, {}, '10s')
+      const pub = client.provide('temp', 21.5, {}, '10s')
 
       // update() must not throw even though the registry is down
       await assert.doesNotReject(() => pub.update(25.0))
@@ -392,7 +392,7 @@ describe('Client', () => {
       })
 
       const changes = []
-      const pub = await client.provide('temp', 21.5, {}, '5s')
+      const pub = client.provide('temp', 21.5, {}, '5s')
       pub.on('change', v => changes.push(v))
 
       // Let polling loop start

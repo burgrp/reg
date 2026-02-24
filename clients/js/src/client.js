@@ -180,7 +180,7 @@ export class ProviderSubscription extends EventEmitter {
  * sub.stop()
  *
  * // Provide a register
- * const pub = await client.provide('temperature', 21.5, { unit: 'celsius' }, '5s')
+ * const pub = client.provide('temperature', 21.5, { unit: 'celsius' }, '5s')
  * pub.on('change', requestedValue => pub.update(requestedValue))
  * pub.stop()
  */
@@ -417,16 +417,12 @@ export class Client {
    * @param {any} value - Initial value
    * @param {Object} [metadata={}] - Register metadata
    * @param {string} [ttl='5s'] - TTL as Go duration string (e.g. "5s", "10m")
-   * @returns {Promise<ProviderSubscription>}
+   * @returns {ProviderSubscription}
    */
-  async provide(name, value, metadata = {}, ttl = '5s') {
-    // Attempt to set register; silently ignore errors (registry may be unavailable).
+  provide(name, value, metadata = {}, ttl = '5s') {
+    // Fire-and-forget initial set; errors are silently ignored (registry may be unavailable).
     // The refresh timer will retry until the registry is reachable.
-    try {
-      await this.#providerWire.setRegisters({ [name]: { value, metadata, ttl } })
-    } catch {
-      // Registry unavailable at startup; refresh timer will retry
-    }
+    this.#providerWire.setRegisters({ [name]: { value, metadata, ttl } }).catch(() => {})
 
     const sub = new ProviderSubscription(this, name)
     const ttlMs = parseDuration(ttl)

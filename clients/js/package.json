@@ -1,6 +1,6 @@
 {
   "name": "@burgrp/reg",
-  "version": "1.0.0",
+  "version": "1.0.2",
   "description": "JavaScript client for the reg IoT registry",
   "type": "module",
   "main": "src/index.js",

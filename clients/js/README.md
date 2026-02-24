@@ -119,7 +119,7 @@ continuously refreshes the TTL so it does not expire while the provider is
 running.
 
 ```js
-const pub = await client.provide(
+const pub = client.provide(
   'temperature',
   21.5,
   { unit: 'celsius', location: 'living-room' },
