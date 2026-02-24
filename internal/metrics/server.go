@@ -104,6 +104,11 @@ func toFloat64(v any) (float64, bool) {
 		return float64(n), true
 	case uint64:
 		return float64(n), true
+	case bool:
+		if n {
+			return 1, true
+		}
+		return 0, true
 	default:
 		return 0, false
 	}
