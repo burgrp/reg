@@ -420,8 +420,13 @@ export class Client {
    * @returns {Promise<ProviderSubscription>}
    */
   async provide(name, value, metadata = {}, ttl = '5s') {
-    // Set register immediately
-    await this.#providerWire.setRegisters({ [name]: { value, metadata, ttl } })
+    // Attempt to set register; silently ignore errors (registry may be unavailable).
+    // The refresh timer will retry until the registry is reachable.
+    try {
+      await this.#providerWire.setRegisters({ [name]: { value, metadata, ttl } })
+    } catch {
+      // Registry unavailable at startup; refresh timer will retry
+    }
 
     const sub = new ProviderSubscription(this, name)
     const ttlMs = parseDuration(ttl)
@@ -453,9 +458,13 @@ export class Client {
     const state = this.#providerStates.get(name)
     if (!state) throw new Error(`No active provider for register '${name}'`)
     state.value = value
-    await this.#providerWire.setRegisters({
-      [name]: { value, metadata: state.metadata, ttl: state.ttl },
-    })
+    try {
+      await this.#providerWire.setRegisters({
+        [name]: { value, metadata: state.metadata, ttl: state.ttl },
+      })
+    } catch {
+      // Registry unavailable; refresh timer will send the updated value when reconnected
+    }
   }
 
   #ensureProviderPolling() {

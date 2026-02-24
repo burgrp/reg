@@ -315,6 +315,56 @@ describe('Client', () => {
       pub.stop()
     })
 
+    it('returns ProviderSubscription even when initial registry set fails', async () => {
+      const fetchFn = (_url, opts) => {
+        if (opts?.method === 'PUT') return Promise.reject(new Error('network error'))
+        // GET /provider hangs until aborted
+        return new Promise((_, reject) => {
+          opts?.signal?.addEventListener('abort', () => {
+            const err = new Error('aborted'); err.name = 'AbortError'; reject(err)
+          })
+        })
+      }
+
+      const client = new Client('http://localhost:8080', { fetch: fetchFn, providerPollInterval: 60000 })
+      const pub = await client.provide('temp', 21.5, {}, '10s') // must not throw
+
+      assert.ok(pub)
+      assert.equal(typeof pub.update, 'function')
+      assert.equal(typeof pub.stop, 'function')
+
+      pub.stop()
+    })
+
+    it('update() does not throw when registry is unavailable', async () => {
+      let callCount = 0
+      const fetchFn = (_url, opts) => {
+        if (opts?.method === 'PUT') {
+          callCount++
+          if (callCount === 1) {
+            // Initial provide succeeds
+            return Promise.resolve({ ok: true, status: 204, json: async () => ({}), text: async () => '' })
+          }
+          // Subsequent updates fail (registry disconnected)
+          return Promise.reject(new Error('network error'))
+        }
+        // GET /provider hangs until aborted
+        return new Promise((_, reject) => {
+          opts?.signal?.addEventListener('abort', () => {
+            const err = new Error('aborted'); err.name = 'AbortError'; reject(err)
+          })
+        })
+      }
+
+      const client = new Client('http://localhost:8080', { fetch: fetchFn, providerPollInterval: 60000 })
+      const pub = await client.provide('temp', 21.5, {}, '10s')
+
+      // update() must not throw even though the registry is down
+      await assert.doesNotReject(() => pub.update(25.0))
+
+      pub.stop()
+    })
+
     it('emits change event when consumer requests a change', async () => {
       let resolveChangeRequest
       let callIndex = 0
