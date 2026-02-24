@@ -8,6 +8,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/burgrp/reg/internal/metrics"
 	"github.com/burgrp/reg/internal/registry"
 	"github.com/burgrp/reg/internal/rest"
 	"github.com/lmittmann/tint"
@@ -17,22 +18,24 @@ import (
 
 func newServeCmd() *cobra.Command {
 	var addr string
+	var metricsAddr string
 
 	cmd := &cobra.Command{
 		Use:   "serve",
 		Short: "Start the registry",
 		Long:  `Starts the registry server with specified parameters.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runServe(addr)
+			return runServe(addr, metricsAddr)
 		},
 	}
 
 	cmd.Flags().StringVarP(&addr, "rest", "r", ":8080", "Address to listen on for REST protocol")
+	cmd.Flags().StringVarP(&metricsAddr, "metrics", "m", "", "Address to listen on for Prometheus metrics (disabled if empty)")
 
 	return cmd
 }
 
-func runServe(addr string) error {
+func runServe(addr string, metricsAddr string) error {
 	// Setup logger with tint
 	logger := slog.New(tint.NewHandler(os.Stderr, &tint.Options{
 		Level:      slog.LevelDebug,
@@ -59,6 +62,13 @@ func runServe(addr string) error {
 	// Start REST server
 	if err := rest.RunServer(ctx, addr, reg, logger, &errGroup); err != nil {
 		return err
+	}
+
+	// Start Prometheus metrics server if address is configured
+	if metricsAddr != "" {
+		if err := metrics.RunServer(ctx, metricsAddr, reg, logger, &errGroup); err != nil {
+			return err
+		}
 	}
 
 	// Handle shutdown signal
