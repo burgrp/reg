@@ -70,7 +70,7 @@ go build -o reg
 ./reg serve
 
 # Start server on custom port
-./reg serve --addr :9000
+./reg serve --rest :9000
 ```
 
 ### Using the CLI

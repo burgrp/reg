@@ -62,7 +62,7 @@ go tool cover -html=coverage.out
 ./reg serve
 
 # Start on custom port
-./reg serve --addr :9000
+./reg serve --rest :9000
 
 # With custom logging
 LOG_LEVEL=debug ./reg serve
@@ -296,7 +296,7 @@ go install github.com/go-delve/delve/cmd/dlv@latest
 dlv test ./pkg/client/rest -- -test.run TestClient_Consume
 
 # Debug application
-dlv debug . -- serve --addr :8080
+dlv debug . -- serve --rest :8080
 
 # Common commands
 (dlv) break main.main

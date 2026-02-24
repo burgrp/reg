@@ -27,7 +27,7 @@ func newServeCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVarP(&addr, "addr", "a", ":8080", "Address to listen on")
+	cmd.Flags().StringVarP(&addr, "rest", "r", ":8080", "Address to listen on for REST protocol")
 
 	return cmd
 }

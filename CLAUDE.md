@@ -14,7 +14,7 @@ go build -o reg
 
 # Run the server
 ./reg serve
-./reg serve --addr :8080
+./reg serve --rest :8080
 
 # Graceful shutdown
 kill -TERM <pid>  # or Ctrl+C
@@ -203,7 +203,7 @@ func NewClientFromEnv() (client.Client, error)
 Starts the registry server:
 ```bash
 ./reg serve              # Default :8080
-./reg serve --addr :9000 # Custom address
+./reg serve --rest :9000 # Custom address
 ```
 
 See "Graceful Shutdown" section for shutdown behavior.
