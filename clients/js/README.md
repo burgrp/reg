@@ -118,7 +118,7 @@ sub.stop()
 
 ---
 
-### `async provide(name, value, metadata?, ttl?)` → `ProviderSubscription`
+### `provide(name, value, metadata?, ttl?)` → `ProviderSubscription`
 
 Publish a register and keep it alive. Sets the register immediately, then
 continuously refreshes the TTL so it does not expire while the provider is
