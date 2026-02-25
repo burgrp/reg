@@ -110,6 +110,15 @@ export class ConsumeAllSubscription extends EventEmitter {
   get stopped() { return this.#stopped }
 
   /**
+   * Send a change request to the provider of the named register.
+   * @param {string} name - Register name
+   * @param {any} value - Requested new value
+   */
+  request(name, value) {
+    this.#client._requestChange(name, value)
+  }
+
+  /**
    * Unsubscribe and stop receiving updates.
    */
   stop() {

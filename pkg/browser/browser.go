@@ -1048,7 +1048,7 @@ func (b *Browser) cancelFilter() {
 
 func (b *Browser) Run() error {
 	// Start consuming all registers
-	updates, err := b.client.ConsumeAll(b.ctx)
+	updates, _, err := b.client.ConsumeAll(b.ctx)
 	if err != nil {
 		return fmt.Errorf("failed to consume registers: %w", err)
 	}

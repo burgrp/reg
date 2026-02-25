@@ -10,8 +10,9 @@ import (
 )
 
 // ConsumeAll implements client.Client.ConsumeAll
-func (c *Client) ConsumeAll(ctx context.Context) (<-chan client.RegisterUpdate, error) {
+func (c *Client) ConsumeAll(ctx context.Context) (<-chan client.RegisterUpdate, chan<- client.RegisterChangeRequest, error) {
 	updates := make(chan client.RegisterUpdate, 10)
+	requests := make(chan client.RegisterChangeRequest, 10)
 
 	// Track last seen values for each register to avoid duplicates
 	lastValues := make(map[string]any)
@@ -109,5 +110,20 @@ func (c *Client) ConsumeAll(ctx context.Context) (<-chan client.RegisterUpdate, 
 		}
 	}()
 
-	return updates, nil
+	// Handle change requests
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case req, ok := <-requests:
+				if !ok {
+					return
+				}
+				c.consumerClient.RequestChange(ctx, req.Name, req.Value)
+			}
+		}
+	}()
+
+	return updates, requests, nil
 }

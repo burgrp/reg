@@ -442,6 +442,33 @@ describe('Client', () => {
       sub.stop()
     })
 
+    it('request() sends a change request for the named register', async () => {
+      const putBodies = []
+      const fetchFn = (_url, opts) => {
+        if (opts?.method === 'PUT') {
+          putBodies.push(JSON.parse(opts.body))
+          return Promise.resolve({ ok: true, status: 202, json: async () => ({}), text: async () => '' })
+        }
+        // GET — hang until aborted
+        return new Promise((_, reject) => {
+          opts?.signal?.addEventListener('abort', () => {
+            const err = new Error('aborted'); err.name = 'AbortError'; reject(err)
+          })
+        })
+      }
+
+      const client = new Client('http://localhost:8080', { fetch: fetchFn, consumerPollInterval: 60000 })
+      const sub = client.consumeAll()
+
+      sub.request('temp', 30)
+      await tick()
+
+      assert.equal(putBodies.length, 1)
+      assert.equal(putBodies[0].registers.temp.value, 30)
+
+      sub.stop()
+    })
+
     it('includes register name in each update event', async () => {
       const { fetchFn, respond } = createControllableFetch()
       const client = new Client('http://localhost:8080', {

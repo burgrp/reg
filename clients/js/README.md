@@ -104,11 +104,17 @@ sub.on('update', ({ name, value, metadata }) => {
   console.log(name, '=', value)
 })
 
+// Request a value change for a specific register by name
+sub.request('temperature', 22.0)
+
 sub.stop()
 ```
 
 **Events:**
 * `'update'` – `{ name, value, metadata }` – emitted for each changed register
+
+**Methods:**
+* `request(name, value)` – send a change request to the provider of the named register
 
 ---
 

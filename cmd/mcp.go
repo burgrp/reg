@@ -203,7 +203,7 @@ func registerListTool(server *mcp.Server, regClient client.Client) {
 		Description: "List all registers with their current values and metadata",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, args listRegistersArgs) (*mcp.CallToolResult, any, error) {
 		// Use ConsumeAll to get all registers
-		updates, err := regClient.ConsumeAll(ctx)
+		updates, _, err := regClient.ConsumeAll(ctx)
 		if err != nil {
 			return &mcp.CallToolResult{
 				Content: []mcp.Content{

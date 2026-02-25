@@ -55,7 +55,7 @@ func runList(withMetadata bool, stay bool) error {
 
 	if !stay {
 		// Single list mode
-		updates, err := c.ConsumeAll(ctx)
+		updates, _, err := c.ConsumeAll(ctx)
 		if err != nil {
 			return fmt.Errorf("failed to consume registers: %w", err)
 		}
@@ -111,7 +111,7 @@ func runList(withMetadata bool, stay bool) error {
 	}
 
 	// Stay mode: continuously output updates
-	updates, err := c.ConsumeAll(ctx)
+	updates, _, err := c.ConsumeAll(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to consume registers: %w", err)
 	}
