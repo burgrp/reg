@@ -1,6 +1,6 @@
-# CLAUDE.md
+# COPILOT.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to Copilot CLI when working with code in this repository.
 
 ## Project Overview
 
@@ -109,7 +109,7 @@ Commands use factory functions (`newServeCmd()`, `newRootCmd()`) instead of pack
 
 ### Simplified Model (No Explicit Provider/Consumer Interfaces)
 
-Unlike the original design documented in CLAUDE.md, the current implementation does NOT use explicit Provider/Consumer interfaces. Instead:
+Unlike the original design documented in COPILOT.md, the current implementation does NOT use explicit Provider/Consumer interfaces. Instead:
 - Protocols call registry methods directly
 - No connection tracking or ownership
 - Registers exist independently until TTL expires
@@ -264,7 +264,7 @@ export REGISTRY=http://localhost:8080
 **Behavior:**
 - Requires `REGISTRY` environment variable (e.g., `http://localhost:8080`)
 - Communicates over stdin/stdout using JSON-RPC 2.0
-- Designed for use with MCP clients like Claude Desktop, Cline, etc.
+- Designed for use with MCP clients like Copilot CLI, Cline, etc.
 - Blocks indefinitely, processing JSON-RPC requests
 
 **MCP Tools Exposed:**
