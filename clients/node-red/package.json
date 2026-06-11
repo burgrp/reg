@@ -1,0 +1,29 @@
+{
+  "name": "@burgrp/node-red-contrib-reg",
+  "version": "0.1.0",
+  "description": "Node-RED nodes for the reg IoT registry",
+  "main": "nodes/reg-config.js",
+  "scripts": {
+    "test": "node --test"
+  },
+  "node-red": {
+    "nodes": {
+      "reg-config": "nodes/reg-config.js",
+      "reg-consume": "nodes/reg-consume.js",
+      "reg-consume-all": "nodes/reg-consume-all.js",
+      "reg-provide": "nodes/reg-provide.js",
+      "reg-request": "nodes/reg-request.js"
+    }
+  },
+  "keywords": [
+    "node-red",
+    "registry",
+    "iot",
+    "reg"
+  ],
+  "author": "",
+  "license": "ISC",
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

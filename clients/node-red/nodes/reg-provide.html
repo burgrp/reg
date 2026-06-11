@@ -1,0 +1,48 @@
+<script type="text/javascript">
+  RED.nodes.registerType('reg-provide', {
+    category: 'reg',
+    color: '#ffe4c4',
+    defaults: {
+      name: { value: '', required: true },
+      server: { value: '', type: 'reg-config', required: true },
+      initialValue: { value: 'null', required: false },
+      metadata: { value: '{}', required: false },
+      ttl: { value: '5s', required: true }
+    },
+    inputs: 1,
+    outputs: 1,
+    icon: 'font-awesome/fa-upload',
+    label: function () {
+      return this.name ? `provide ${this.name}` : 'reg-provide'
+    }
+  })
+</script>
+
+<script type="text/html" data-template-name="reg-provide">
+  <div class="form-row">
+    <label for="node-input-server"><i class="fa fa-cog"></i> Config</label>
+    <input type="text" id="node-input-server">
+  </div>
+  <div class="form-row">
+    <label for="node-input-name"><i class="fa fa-tag"></i> Register</label>
+    <input type="text" id="node-input-name" placeholder="temperature">
+  </div>
+  <div class="form-row">
+    <label for="node-input-initialValue"><i class="fa fa-play"></i> Initial Value (JSON)</label>
+    <input type="text" id="node-input-initialValue" placeholder="21.5">
+  </div>
+  <div class="form-row">
+    <label for="node-input-metadata"><i class="fa fa-info-circle"></i> Metadata (JSON)</label>
+    <input type="text" id="node-input-metadata" placeholder='{"unit":"celsius"}'>
+  </div>
+  <div class="form-row">
+    <label for="node-input-ttl"><i class="fa fa-hourglass-half"></i> TTL</label>
+    <input type="text" id="node-input-ttl" placeholder="5s">
+  </div>
+</script>
+
+<script type="text/html" data-help-name="reg-provide">
+  <p>Provides a register and keeps it alive with TTL refresh.</p>
+  <p>Input payload updates the provided register value.</p>
+  <p>Output payload carries consumer-requested values (change requests).</p>
+</script>

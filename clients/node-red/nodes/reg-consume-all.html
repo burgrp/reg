@@ -1,0 +1,33 @@
+<script type="text/javascript">
+  RED.nodes.registerType('reg-consume-all', {
+    category: 'reg',
+    color: '#d7f9e2',
+    defaults: {
+      name: { value: '' },
+      server: { value: '', type: 'reg-config', required: true }
+    },
+    inputs: 1,
+    outputs: 1,
+    icon: 'font-awesome/fa-list',
+    label: function () {
+      return this.name || 'reg-consume-all'
+    }
+  })
+</script>
+
+<script type="text/html" data-template-name="reg-consume-all">
+  <div class="form-row">
+    <label for="node-input-server"><i class="fa fa-cog"></i> Config</label>
+    <input type="text" id="node-input-server">
+  </div>
+  <div class="form-row">
+    <label for="node-input-name"><i class="fa fa-tag"></i> Name</label>
+    <input type="text" id="node-input-name" placeholder="optional display name">
+  </div>
+</script>
+
+<script type="text/html" data-help-name="reg-consume-all">
+  <p>Subscribes to all registers and emits one message per changed register.</p>
+  <p>Input requests a change using msg.topic as register name and msg.payload as requested value.</p>
+  <p>Output: msg.topic=register name, msg.payload=value, msg.metadata=metadata object.</p>
+</script>

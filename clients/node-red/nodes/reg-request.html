@@ -1,0 +1,33 @@
+<script type="text/javascript">
+  RED.nodes.registerType('reg-request', {
+    category: 'reg',
+    color: '#f3d6ff',
+    defaults: {
+      name: { value: '' },
+      server: { value: '', type: 'reg-config', required: true }
+    },
+    inputs: 1,
+    outputs: 1,
+    icon: 'font-awesome/fa-paper-plane',
+    label: function () {
+      return this.name ? `request ${this.name}` : 'reg-request'
+    }
+  })
+</script>
+
+<script type="text/html" data-template-name="reg-request">
+  <div class="form-row">
+    <label for="node-input-server"><i class="fa fa-cog"></i> Config</label>
+    <input type="text" id="node-input-server">
+  </div>
+  <div class="form-row">
+    <label for="node-input-name"><i class="fa fa-tag"></i> Register (optional)</label>
+    <input type="text" id="node-input-name" placeholder="if empty, uses msg.topic">
+  </div>
+</script>
+
+<script type="text/html" data-help-name="reg-request">
+  <p>Sends consumer change requests.</p>
+  <p>Register comes from configured name or msg.topic.</p>
+  <p>Requested value comes from msg.payload.</p>
+</script>
