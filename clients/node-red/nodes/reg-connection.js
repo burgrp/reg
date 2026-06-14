@@ -29,7 +29,5 @@ module.exports = function (RED) {
     }
   }
 
-  // Keep the legacy type so previously saved flows continue to load.
-  RED.nodes.registerType('reg-config', RegConfigNode)
   RED.nodes.registerType('reg-connection', RegConfigNode)
 }

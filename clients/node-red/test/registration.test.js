@@ -12,7 +12,6 @@ test('registers all node types', () => {
   require('../nodes/reg-request.js')(RED)
 
   assert.ok(RED._registry['reg-connection'])
-  assert.ok(RED._registry['reg-config'])
   assert.ok(RED._registry['reg-consume'])
   assert.ok(RED._registry['reg-consume-all'])
   assert.ok(RED._registry['reg-provide'])

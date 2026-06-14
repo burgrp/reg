@@ -1,6 +1,6 @@
 <script type="text/javascript">
   RED.nodes.registerType('reg-provide', {
-    category: 'reg',
+    category: 'registers',
     color: '#ffe4c4',
     defaults: {
       name: { value: '', required: true },
@@ -13,18 +13,18 @@
     outputs: 1,
     icon: 'font-awesome/fa-upload',
     label: function () {
-      return this.name ? `provide ${this.name}` : 'reg-provide'
+      return this.name ? this.name : 'provide'
     }
   })
 </script>
 
 <script type="text/html" data-template-name="reg-provide">
   <div class="form-row">
-    <label for="node-input-server"><i class="fa fa-cog"></i> Config</label>
+    <label for="node-input-server"><i class="fa fa-cog"></i> Registry</label>
     <input type="text" id="node-input-server">
   </div>
   <div class="form-row">
-    <label for="node-input-name"><i class="fa fa-tag"></i> Register</label>
+    <label for="node-input-name"><i class="fa fa-tag"></i> Register name</label>
     <input type="text" id="node-input-name" placeholder="temperature">
   </div>
   <div class="form-row">

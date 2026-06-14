@@ -1,6 +1,6 @@
 <script type="text/javascript">
   RED.nodes.registerType('reg-consume', {
-    category: 'reg',
+    category: 'registers',
     color: '#cde6ff',
     defaults: {
       name: { value: '', required: true },
@@ -10,18 +10,18 @@
     outputs: 1,
     icon: 'font-awesome/fa-download',
     label: function () {
-      return this.name ? `consume ${this.name}` : 'reg-consume'
+      return this.name ? this.name : 'consume'
     }
   })
 </script>
 
 <script type="text/html" data-template-name="reg-consume">
   <div class="form-row">
-    <label for="node-input-server"><i class="fa fa-cog"></i> Config</label>
+    <label for="node-input-server"><i class="fa fa-cog"></i> Registry</label>
     <input type="text" id="node-input-server">
   </div>
   <div class="form-row">
-    <label for="node-input-name"><i class="fa fa-tag"></i> Register</label>
+    <label for="node-input-name"><i class="fa fa-tag"></i> Register name</label>
     <input type="text" id="node-input-name" placeholder="temperature">
   </div>
 </script>

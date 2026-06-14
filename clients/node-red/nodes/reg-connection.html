@@ -13,7 +13,6 @@
   }
 
   RED.nodes.registerType('reg-connection', regConnectionDefinition)
-  RED.nodes.registerType('reg-config', regConnectionDefinition)
 </script>
 
 <script type="text/html" data-template-name="reg-connection">
@@ -22,26 +21,7 @@
     <input type="text" id="node-config-input-name" placeholder="Registry">
   </div>
   <div class="form-row">
-    <label for="node-config-input-registryUrl"><i class="fa fa-globe"></i> Registry URL</label>
-    <input type="text" id="node-config-input-registryUrl" placeholder="http://localhost:8080">
-  </div>
-  <div class="form-row">
-    <label for="node-config-input-consumerPollInterval"><i class="fa fa-clock-o"></i> Consumer Poll (ms)</label>
-    <input type="text" id="node-config-input-consumerPollInterval" placeholder="5000">
-  </div>
-  <div class="form-row">
-    <label for="node-config-input-providerPollInterval"><i class="fa fa-clock-o"></i> Provider Poll (ms)</label>
-    <input type="text" id="node-config-input-providerPollInterval" placeholder="30000">
-  </div>
-</script>
-
-<script type="text/html" data-template-name="reg-config">
-  <div class="form-row">
-    <label for="node-config-input-name"><i class="fa fa-tag"></i> Registry</label>
-    <input type="text" id="node-config-input-name" placeholder="Registry">
-  </div>
-  <div class="form-row">
-    <label for="node-config-input-registryUrl"><i class="fa fa-globe"></i> Registry URL</label>
+    <label for="node-config-input-registryUrl"><i class="fa fa-globe"></i> URL</label>
     <input type="text" id="node-config-input-registryUrl" placeholder="http://localhost:8080">
   </div>
   <div class="form-row">
@@ -56,10 +36,5 @@
 
 <script type="text/html" data-help-name="reg-connection">
   <p>Shared registry connection settings for reg nodes.</p>
-  <p>Registry URL defaults to the REGISTRY environment variable when empty.</p>
-</script>
-
-<script type="text/html" data-help-name="reg-config">
-  <p>Legacy alias for Registry connection settings.</p>
-  <p>Existing flows using reg-config continue to work; new flows should use reg-connection.</p>
+  <p>URL defaults to the REGISTRY environment variable when empty.</p>
 </script>
