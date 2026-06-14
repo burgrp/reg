@@ -2,13 +2,13 @@
   "name": "@burgrp/node-red-contrib-reg",
   "version": "0.1.0",
   "description": "Node-RED nodes for the reg IoT registry",
-  "main": "nodes/reg-config.js",
+  "main": "nodes/reg-connection.js",
   "scripts": {
     "test": "node --test"
   },
   "node-red": {
     "nodes": {
-      "reg-config": "nodes/reg-config.js",
+      "reg-connection": "nodes/reg-connection.js",
       "reg-consume": "nodes/reg-consume.js",
       "reg-consume-all": "nodes/reg-consume-all.js",
       "reg-provide": "nodes/reg-provide.js",

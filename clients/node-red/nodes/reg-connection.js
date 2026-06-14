@@ -11,7 +11,7 @@ module.exports = function (RED) {
     this.providerPollInterval = asInteger(config.providerPollInterval, 30000)
 
     if (!this.registryUrl) {
-      this.error('registry URL is required in reg-config or REGISTRY env var')
+      this.error('registry URL is required in reg-connection or REGISTRY env var')
       this.client = null
       return
     }
@@ -23,11 +23,13 @@ module.exports = function (RED) {
 
     this.getClient = () => {
       if (!this.client) {
-        throw new Error('reg-config client is not initialized')
+        throw new Error('reg-connection client is not initialized')
       }
       return this.client
     }
   }
 
+  // Keep the legacy type so previously saved flows continue to load.
   RED.nodes.registerType('reg-config', RegConfigNode)
+  RED.nodes.registerType('reg-connection', RegConfigNode)
 }

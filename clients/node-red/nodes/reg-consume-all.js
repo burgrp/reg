@@ -5,8 +5,8 @@ module.exports = function (RED) {
     const node = this
     const server = RED.nodes.getNode(config.server)
     if (!server) {
-      node.status({ fill: 'red', shape: 'ring', text: 'missing reg-config' })
-      node.error('reg-config is required')
+      node.status({ fill: 'red', shape: 'ring', text: 'missing registry' })
+      node.error('reg-connection is required')
       return
     }
 

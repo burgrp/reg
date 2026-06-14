@@ -4,7 +4,7 @@ Node-RED node library for the reg IoT registry.
 
 ## Included Nodes
 
-- reg-config: shared registry URL and polling settings
+- reg-connection: shared registry URL and polling settings
 - reg-consume: subscribe to one register and request changes for it
 - reg-consume-all: subscribe to all registers and request changes by topic
 - reg-provide: provide a register value and receive change requests
@@ -65,7 +65,7 @@ npm link @burgrp/node-red-contrib-reg
 
 ## Node Settings
 
-reg-config supports:
+reg-connection supports:
 
 - registryUrl (default: http://localhost:8080)
 - consumerPollInterval in milliseconds (default: 5000)
@@ -77,7 +77,7 @@ If registryUrl is empty, REGISTRY environment variable is used.
 
 Import the JSON below in Node-RED (Menu -> Import -> Clipboard). It creates:
 
-- one reg-config node for http://localhost:8080
+- one reg-connection node for http://localhost:8080
 - one reg-provide node for register temperature
 - one reg-consume node for the same register
 - one reg-request node to request value changes
@@ -94,7 +94,7 @@ Import the JSON below in Node-RED (Menu -> Import -> Clipboard). It creates:
 	},
 	{
 		"id": "a1b2c3d4e5f60111",
-		"type": "reg-config",
+		"type": "reg-connection",
 		"name": "local-reg",
 		"registryUrl": "http://localhost:8080",
 		"consumerPollInterval": "5000",
