@@ -37,8 +37,6 @@ module.exports = function (RED) {
         node.error(err)
       })
 
-      node.status({ fill: 'green', shape: 'dot', text: `providing ${registerName}` })
-
       node.on('input', async (msg, send, done) => {
         try {
           await sub.update(msg.payload)
