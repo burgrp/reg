@@ -25,7 +25,7 @@ module.exports = function (RED) {
       sub = server.getClient().provide(registerName, initialValue, initialMetadata, ttl)
 
       sub.on('change', (requestedValue) => {
-        node.status({ fill: 'yellow', shape: 'dot', text: `change ${registerName}` })
+        node.status({ fill: 'yellow', shape: 'dot', text: `requested ${requestedValue}` })
         node.send({
           topic: registerName,
           payload: requestedValue,
