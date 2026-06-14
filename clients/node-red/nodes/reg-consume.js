@@ -19,7 +19,7 @@ module.exports = function (RED) {
       sub = server.getClient().consume(registerName)
 
       sub.on('value', ({ value, metadata }) => {
-        node.status({ fill: 'green', shape: 'dot', text: `value ${registerName}` })
+        node.status({ fill: 'green', shape: 'dot', text: `value ${value}` })
         node.send({
           topic: registerName,
           payload: value,
@@ -37,7 +37,7 @@ module.exports = function (RED) {
       node.on('input', async (msg, send, done) => {
         try {
           await sub.request(msg.payload)
-          node.status({ fill: 'green', shape: 'dot', text: `requested ${registerName}` })
+          node.status({ fill: 'green', shape: 'dot', text: `requested ${msg.payload}` })
           done()
         } catch (err) {
           node.status({ fill: 'red', shape: 'ring', text: 'request failed' })

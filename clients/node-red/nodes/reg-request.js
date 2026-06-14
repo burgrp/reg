@@ -18,7 +18,7 @@ module.exports = function (RED) {
       try {
         const registerName = resolveRegisterName(config.name, msg)
         await server.getClient().requestChange(registerName, msg.payload)
-        node.status({ fill: 'green', shape: 'dot', text: `requested ${registerName}` })
+        node.status({ fill: 'green', shape: 'dot', text: `requested ${msg.payload}` })
         send({
           ...msg,
           topic: registerName,

@@ -16,7 +16,6 @@ module.exports = function (RED) {
       sub = server.getClient().consumeAll()
 
       sub.on('update', ({ name, value, metadata }) => {
-        node.status({ fill: 'green', shape: 'dot', text: `update ${name}` })
         node.send({
           topic: name,
           payload: value,
@@ -28,8 +27,6 @@ module.exports = function (RED) {
         node.status({ fill: 'red', shape: 'ring', text: 'error' })
         node.error(err)
       })
-
-      node.status({ fill: 'blue', shape: 'ring', text: 'subscribing all' })
 
       node.on('input', async (msg, send, done) => {
         try {

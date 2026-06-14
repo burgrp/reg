@@ -42,7 +42,7 @@ module.exports = function (RED) {
       node.on('input', async (msg, send, done) => {
         try {
           await sub.update(msg.payload)
-          node.status({ fill: 'green', shape: 'dot', text: `updated ${registerName}` })
+          node.status({ fill: 'green', shape: 'dot', text: `value ${msg.payload}` })
           done()
         } catch (err) {
           node.status({ fill: 'red', shape: 'ring', text: 'update failed' })
