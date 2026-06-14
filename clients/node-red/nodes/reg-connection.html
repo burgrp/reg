@@ -5,7 +5,7 @@
       name: { value: '' },
       registryUrl: { value: 'http://localhost:8080', required: false },
       consumerPollInterval: { value: 5000, required: true, validate: RED.validators.number() },
-      providerPollInterval: { value: 30000, required: true, validate: RED.validators.number() }
+      providerPollInterval: { value: 5000, required: true, validate: RED.validators.number() }
     },
     label: function () {
       return this.name || 'Registry'
@@ -30,11 +30,12 @@
   </div>
   <div class="form-row">
     <label for="node-config-input-providerPollInterval"><i class="fa fa-clock-o"></i> Provider Poll (ms)</label>
-    <input type="text" id="node-config-input-providerPollInterval" placeholder="30000">
+    <input type="text" id="node-config-input-providerPollInterval" placeholder="5000">
   </div>
 </script>
 
 <script type="text/html" data-help-name="reg-connection">
   <p>Shared registry connection settings for reg nodes.</p>
   <p>URL defaults to the REGISTRY environment variable when empty.</p>
+  <p>Provider Poll controls how quickly reg-provide receives consumer change requests.</p>
 </script>

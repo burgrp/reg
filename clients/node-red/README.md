@@ -69,7 +69,7 @@ reg-connection supports:
 
 - registryUrl (default: http://localhost:8080)
 - consumerPollInterval in milliseconds (default: 5000)
-- providerPollInterval in milliseconds (default: 30000)
+- providerPollInterval in milliseconds (default: 5000)
 
 If registryUrl is empty, REGISTRY environment variable is used.
 
@@ -98,7 +98,7 @@ Import the JSON below in Node-RED (Menu -> Import -> Clipboard). It creates:
 		"name": "local-reg",
 		"registryUrl": "http://localhost:8080",
 		"consumerPollInterval": "5000",
-		"providerPollInterval": "30000"
+		"providerPollInterval": "5000"
 	},
 	{
 		"id": "b1c2d3e4f5a60122",
