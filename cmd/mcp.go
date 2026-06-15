@@ -6,8 +6,8 @@ import (
 	"log/slog"
 	"time"
 
-	clientfactory "github.com/burgrp/reg/pkg/client/factory"
 	"github.com/burgrp/reg/pkg/client"
+	clientfactory "github.com/burgrp/reg/pkg/client/factory"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/spf13/cobra"
 )
@@ -229,6 +229,10 @@ func registerListTool(server *mcp.Server, regClient client.Client) {
 			case update, ok := <-updates:
 				if !ok {
 					break readLoop
+				}
+				if update.Removed {
+					delete(registers, update.Name)
+					continue
 				}
 				registers[update.Name] = registerInfo{
 					Value:    update.Value,

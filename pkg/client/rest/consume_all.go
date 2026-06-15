@@ -73,7 +73,9 @@ func (c *Client) ConsumeAll(ctx context.Context) (<-chan client.RegisterUpdate, 
 			}
 
 			mu.Lock()
+			seen := make(map[string]struct{}, len(registers))
 			for name, reg := range registers {
+				seen[name] = struct{}{}
 				// Check if value or metadata changed
 				lastVal, hasLastVal := lastValues[name]
 				lastMeta := lastMetadata[name]
@@ -104,6 +106,25 @@ func (c *Client) ConsumeAll(ctx context.Context) (<-chan client.RegisterUpdate, 
 						mu.Unlock()
 						return
 					}
+				}
+			}
+
+			for name := range lastValues {
+				if _, ok := seen[name]; ok {
+					continue
+				}
+
+				delete(lastValues, name)
+				delete(lastMetadata, name)
+
+				select {
+				case updates <- client.RegisterUpdate{
+					Name:    name,
+					Removed: true,
+				}:
+				case <-ctx.Done():
+					mu.Unlock()
+					return
 				}
 			}
 			mu.Unlock()

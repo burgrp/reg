@@ -81,6 +81,10 @@ func runList(withMetadata bool, stay bool) error {
 				if !ok {
 					break readLoop
 				}
+				if update.Removed {
+					delete(registers, update.Name)
+					continue
+				}
 				registers[update.Name] = register{
 					name:     update.Name,
 					value:    update.Value,
@@ -117,6 +121,9 @@ func runList(withMetadata bool, stay bool) error {
 	}
 
 	for update := range updates {
+		if update.Removed {
+			continue
+		}
 		outputRegister(update.Name, update.Value, update.Metadata, withMetadata)
 	}
 

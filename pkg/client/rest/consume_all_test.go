@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -85,5 +86,58 @@ func TestClient_ConsumeAll_RequestChange(t *testing.T) {
 		}
 	case <-time.After(500 * time.Millisecond):
 		t.Fatal("timeout waiting for PUT request")
+	}
+}
+
+func TestClient_ConsumeAll_RemovalUpdate(t *testing.T) {
+	var getCount int32
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			count := atomic.AddInt32(&getCount, 1)
+			if count == 1 {
+				json.NewEncoder(w).Encode(wirest.ConsumerGetResponse{
+					Registers: map[string]wirest.ConsumerGetRegister{
+						"temp": {Value: 21.5},
+					},
+				})
+				return
+			}
+
+			json.NewEncoder(w).Encode(wirest.ConsumerGetResponse{Registers: map[string]wirest.ConsumerGetRegister{}})
+			return
+		}
+
+		w.WriteHeader(http.StatusAccepted)
+	}))
+	defer server.Close()
+
+	c := NewClient(server.URL)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	updates, _, err := c.ConsumeAll(ctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Initial register
+	select {
+	case u := <-updates:
+		if u.Name != "temp" || u.Removed {
+			t.Fatalf("expected initial temp update, got %+v", u)
+		}
+	case <-time.After(700 * time.Millisecond):
+		t.Fatal("timeout waiting for initial update")
+	}
+
+	// Tombstone/removal update
+	select {
+	case u := <-updates:
+		if u.Name != "temp" || !u.Removed {
+			t.Fatalf("expected removal update for temp, got %+v", u)
+		}
+	case <-time.After(1500 * time.Millisecond):
+		t.Fatal("timeout waiting for removal update")
 	}
 }

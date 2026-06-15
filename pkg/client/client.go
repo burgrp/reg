@@ -44,6 +44,7 @@ type RegisterUpdate struct {
 	Name     string
 	Value    any
 	Metadata map[string]any
+	Removed  bool
 }
 
 // RegisterChangeRequest represents a consumer change request for a named register (used by ConsumeAll)

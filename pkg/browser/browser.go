@@ -39,6 +39,7 @@ type Browser struct {
 	editOverlay   *tview.Flex
 	boolRadio     *tview.Form
 	boolSelection int // 0=true, 1=false, 2=null
+	lastEvent     string
 }
 
 type RegisterData struct {
@@ -213,7 +214,11 @@ func (b *Browser) updateStatusBar() {
 	for _, hotKey := range activeHotKeys {
 		parts = append(parts, fmt.Sprintf("[white:black:b]%s [black:teal:-] %s [-:-:-]", hotKey.key, hotKey.action))
 	}
-	b.statusBar.SetText(strings.Join(parts, "  "))
+	text := strings.Join(parts, "  ")
+	if b.lastEvent != "" {
+		text = fmt.Sprintf("[yellow:black]Event:[-:-:-] [white:black]%s[-:-:-]  %s", b.lastEvent, text)
+	}
+	b.statusBar.SetText(text)
 }
 
 func (b *Browser) setupKeyBindings() {
@@ -1057,16 +1062,27 @@ func (b *Browser) Run() error {
 	// Start background goroutine to handle updates
 	go func() {
 		for update := range updates {
+			removed := update.Removed
+			name := update.Name
 			b.registersMu.Lock()
-			b.registers[update.Name] = &RegisterData{
-				Name:     update.Name,
-				Value:    update.Value,
-				Metadata: update.Metadata,
+			if removed {
+				delete(b.registers, name)
+			} else {
+				b.registers[name] = &RegisterData{
+					Name:     name,
+					Value:    update.Value,
+					Metadata: update.Metadata,
+				}
 			}
 			b.registersMu.Unlock()
 
 			// Update UI on the main thread
 			b.app.QueueUpdateDraw(func() {
+				if removed {
+					b.lastEvent = fmt.Sprintf("Removed %s", name)
+					b.updateStatusBar()
+				}
+
 				if b.treeMode {
 					// Preserve current node position by saving its path
 					var nodePath []string
