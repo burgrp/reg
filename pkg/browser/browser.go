@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/burgrp/reg/pkg/client"
 	"github.com/gdamore/tcell/v2"
@@ -39,13 +40,14 @@ type Browser struct {
 	editOverlay   *tview.Flex
 	boolRadio     *tview.Form
 	boolSelection int // 0=true, 1=false, 2=null
-	lastEvent     string
 }
 
 type RegisterData struct {
-	Name     string
-	Value    any
-	Metadata map[string]any
+	Name      string
+	Value     any
+	Metadata  map[string]any
+	RemovedAt time.Time
+	removeSeq uint64
 }
 
 type TreeNode struct {
@@ -214,11 +216,7 @@ func (b *Browser) updateStatusBar() {
 	for _, hotKey := range activeHotKeys {
 		parts = append(parts, fmt.Sprintf("[white:black:b]%s [black:teal:-] %s [-:-:-]", hotKey.key, hotKey.action))
 	}
-	text := strings.Join(parts, "  ")
-	if b.lastEvent != "" {
-		text = fmt.Sprintf("[yellow:black]Event:[-:-:-] [white:black]%s[-:-:-]  %s", b.lastEvent, text)
-	}
-	b.statusBar.SetText(text)
+	b.statusBar.SetText(strings.Join(parts, "  "))
 }
 
 func (b *Browser) setupKeyBindings() {
@@ -327,9 +325,13 @@ func (b *Browser) updateListTable() {
 	for i, name := range names {
 		reg := b.registers[name]
 		row := i + 1
+		foregroundColor := tcell.ColorWhite
+		if !reg.RemovedAt.IsZero() {
+			foregroundColor = tcell.ColorRed
+		}
 
 		b.listTable.SetCell(row, 0, tview.NewTableCell(name).
-			SetTextColor(tcell.ColorWhite).
+			SetTextColor(foregroundColor).
 			SetBackgroundColor(tcell.ColorDarkBlue).
 			SetReference(name))
 
@@ -345,7 +347,7 @@ func (b *Browser) updateListTable() {
 			valueStr = valueStr[:47] + "..."
 		}
 		b.listTable.SetCell(row, 1, tview.NewTableCell(valueStr).
-			SetTextColor(tcell.ColorWhite).
+			SetTextColor(foregroundColor).
 			SetBackgroundColor(tcell.ColorDarkBlue))
 	}
 
@@ -423,6 +425,10 @@ func (b *Browser) buildTreeNodes(parent *tview.TreeNode, tree *TreeNode) {
 		node.SetTextStyle(tcell.Style{}.Background(tcell.ColorDarkBlue))
 
 		if child.Register != nil {
+			foregroundColor := tcell.ColorWhite
+			if !child.Register.RemovedAt.IsZero() {
+				foregroundColor = tcell.ColorRed
+			}
 			// Leaf node (actual register)
 			// Format value as JSON
 			valueBytes, err := json.Marshal(child.Register.Value)
@@ -436,7 +442,7 @@ func (b *Browser) buildTreeNodes(parent *tview.TreeNode, tree *TreeNode) {
 				valueStr = valueStr[:27] + "..."
 			}
 			node.SetText(fmt.Sprintf("%s[yellow:darkblue] %s[-:-]", key, valueStr))
-			node.SetColor(tcell.ColorWhite)
+			node.SetColor(foregroundColor)
 			node.SetReference(child.Register.Name)
 		} else {
 			// Intermediate node (folder)
@@ -1064,9 +1070,14 @@ func (b *Browser) Run() error {
 		for update := range updates {
 			removed := update.Removed
 			name := update.Name
+			var removeSeq uint64
 			b.registersMu.Lock()
 			if removed {
-				delete(b.registers, name)
+				if reg, exists := b.registers[name]; exists {
+					reg.RemovedAt = time.Now()
+					reg.removeSeq++
+					removeSeq = reg.removeSeq
+				}
 			} else {
 				b.registers[name] = &RegisterData{
 					Name:     name,
@@ -1076,13 +1087,12 @@ func (b *Browser) Run() error {
 			}
 			b.registersMu.Unlock()
 
+			if removed && removeSeq != 0 {
+				go b.removeRegisterAfterDelay(name, removeSeq)
+			}
+
 			// Update UI on the main thread
 			b.app.QueueUpdateDraw(func() {
-				if removed {
-					b.lastEvent = fmt.Sprintf("Removed %s", name)
-					b.updateStatusBar()
-				}
-
 				if b.treeMode {
 					// Preserve current node position by saving its path
 					var nodePath []string
@@ -1114,4 +1124,43 @@ func (b *Browser) Run() error {
 
 	b.cancel()
 	return nil
+}
+
+func (b *Browser) removeRegisterAfterDelay(name string, removeSeq uint64) {
+	select {
+	case <-b.ctx.Done():
+		return
+	case <-time.After(5 * time.Second):
+	}
+
+	removed := false
+	b.registersMu.Lock()
+	if reg, exists := b.registers[name]; exists && !reg.RemovedAt.IsZero() && reg.removeSeq == removeSeq {
+		delete(b.registers, name)
+		removed = true
+	}
+	b.registersMu.Unlock()
+
+	if !removed {
+		return
+	}
+
+	b.app.QueueUpdateDraw(func() {
+		if b.treeMode {
+			var nodePath []string
+			node := b.treeView.GetCurrentNode()
+			if node != nil && node != b.treeView.GetRoot() {
+				nodePath = b.getNodePath(node)
+			}
+
+			b.updateTreeView()
+
+			if len(nodePath) > 0 {
+				b.selectNodeByPath(nodePath)
+			}
+		} else {
+			b.updateListTable()
+		}
+		b.updateMetadataView()
+	})
 }
