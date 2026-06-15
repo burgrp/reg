@@ -1,6 +1,7 @@
 package registry
 
 import (
+	"context"
 	"log/slog"
 	"os"
 	"testing"
@@ -146,6 +147,24 @@ func TestWaitForChange_Timeout(t *testing.T) {
 	}
 }
 
+func TestWaitForChangeWithContext_Canceled(t *testing.T) {
+	reg := newTestRegistry()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		time.Sleep(30 * time.Millisecond)
+		cancel()
+	}()
+
+	start := time.Now()
+	reg.WaitForChangeWithContext(ctx, []string{"temp"}, 5*time.Second)
+	duration := time.Since(start)
+
+	if duration >= time.Second {
+		t.Fatalf("expected cancellation to interrupt wait early, got %v", duration)
+	}
+}
+
 func TestRequestChange(t *testing.T) {
 	reg := newTestRegistry()
 
@@ -238,6 +257,28 @@ func TestWaitForChangeRequests_LongPolling(t *testing.T) {
 		}
 	case <-time.After(300 * time.Millisecond):
 		t.Error("Long polling timed out")
+	}
+}
+
+func TestWaitForChangeRequestsWithContext_Canceled(t *testing.T) {
+	reg := newTestRegistry()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		time.Sleep(30 * time.Millisecond)
+		cancel()
+	}()
+
+	start := time.Now()
+	requests := reg.WaitForChangeRequestsWithContext(ctx, []string{"temp"}, 5*time.Second)
+	duration := time.Since(start)
+
+	if len(requests) != 0 {
+		t.Fatalf("expected no requests on cancellation, got %d", len(requests))
+	}
+
+	if duration >= time.Second {
+		t.Fatalf("expected cancellation to interrupt wait early, got %v", duration)
 	}
 }
 

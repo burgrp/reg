@@ -38,7 +38,7 @@ func (s *Server) handleConsumer(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		registers := s.registry.WaitForChange(names, wait)
+		registers := s.registry.WaitForChangeWithContext(r.Context(), names, wait)
 
 		response := ConsumerGetResponse{
 			Registers: make(map[string]ConsumerGetRegister, len(registers)),

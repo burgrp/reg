@@ -2,6 +2,7 @@ package metrics
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -42,6 +43,16 @@ func RunServer(ctx context.Context, address string, reg *registry.Registry, logg
 		defer cancel()
 
 		if err := httpServer.Shutdown(shutdownCtx); err != nil {
+			if errors.Is(err, context.DeadlineExceeded) {
+				logger.Warn("metrics server graceful shutdown timed out; forcing close")
+				if closeErr := httpServer.Close(); closeErr != nil {
+					logger.Error("error forcing metrics server close", "error", closeErr)
+					return closeErr
+				}
+				logger.Info("metrics server forced closed")
+				return nil
+			}
+
 			logger.Error("error during metrics server shutdown", "error", err)
 			return err
 		}

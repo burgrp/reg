@@ -40,7 +40,7 @@ func (s *Server) handleProvider(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		requests := s.registry.WaitForChangeRequests(names, wait)
+		requests := s.registry.WaitForChangeRequestsWithContext(r.Context(), names, wait)
 
 		response := ProviderResponse{
 			Registers: make(map[string]ProviderGetRegister),

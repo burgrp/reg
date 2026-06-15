@@ -3,7 +3,9 @@ package rest
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -35,6 +37,9 @@ func RunServer(ctx context.Context, address string, registry *registry.Registry,
 	httpServer := &http.Server{
 		Addr:    address,
 		Handler: mux,
+		BaseContext: func(_ net.Listener) context.Context {
+			return ctx
+		},
 	}
 
 	// Start HTTP server in goroutine
@@ -55,6 +60,16 @@ func RunServer(ctx context.Context, address string, registry *registry.Registry,
 		defer cancel()
 
 		if err := httpServer.Shutdown(shutdownCtx); err != nil {
+			if errors.Is(err, context.DeadlineExceeded) {
+				server.logger.Warn("REST server graceful shutdown timed out; forcing close")
+				if closeErr := httpServer.Close(); closeErr != nil {
+					server.logger.Error("error forcing REST server close", "error", closeErr)
+					return closeErr
+				}
+				server.logger.Info("REST server forced closed")
+				return nil
+			}
+
 			server.logger.Error("error during server shutdown", "error", err)
 			return err
 		}

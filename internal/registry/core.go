@@ -1,6 +1,7 @@
 package registry
 
 import (
+	"context"
 	"log/slog"
 	"reflect"
 	"slices"
@@ -79,8 +80,17 @@ func (r *Registry) cleanupExpiredRegisters(stopChan <-chan struct{}) {
 // waitForNotification waits for a notification on the given listeners matching the specified names.
 // If names is nil, it waits for any notification. Returns when a notification arrives or duration elapses.
 func (r *Registry) waitForNotification(listeners *Listeners[string], names []string, duration time.Duration) {
+	r.waitForNotificationWithContext(context.Background(), listeners, names, duration)
+}
+
+// waitForNotificationWithContext waits for a matching listener notification, timeout, or context cancellation.
+func (r *Registry) waitForNotificationWithContext(ctx context.Context, listeners *Listeners[string], names []string, duration time.Duration) {
 	if duration <= 0 {
 		return
+	}
+
+	if ctx == nil {
+		ctx = context.Background()
 	}
 
 	changed := make(chan struct{}, 1)
@@ -97,6 +107,7 @@ func (r *Registry) waitForNotification(listeners *Listeners[string], names []str
 	timeoutTimer := time.NewTimer(duration)
 	defer timeoutTimer.Stop()
 	select {
+	case <-ctx.Done():
 	case <-changed:
 	case <-timeoutTimer.C:
 	}
@@ -105,7 +116,12 @@ func (r *Registry) waitForNotification(listeners *Listeners[string], names []str
 // WaitForChange waits for changes on the specified registers or until the duration elapses.
 // It's ok to call with nil names, which will wait for any change.
 func (r *Registry) WaitForChange(names []string, duration time.Duration) map[string]Register {
-	r.waitForNotification(&r.valueChangeListeners, names, duration)
+	return r.WaitForChangeWithContext(context.Background(), names, duration)
+}
+
+// WaitForChangeWithContext waits for register changes until a change arrives, timeout elapses, or ctx is canceled.
+func (r *Registry) WaitForChangeWithContext(ctx context.Context, names []string, duration time.Duration) map[string]Register {
+	r.waitForNotificationWithContext(ctx, &r.valueChangeListeners, names, duration)
 
 	if names == nil {
 
@@ -178,7 +194,12 @@ func (r *Registry) RequestChange(name string, value any) {
 // WaitForChangeRequests waits for change requests on specified registers or until duration elapses
 // Returns map of register names to requested values, consuming the requests from the queue
 func (r *Registry) WaitForChangeRequests(names []string, duration time.Duration) map[string]any {
-	r.waitForNotification(&r.changeRequestListeners, names, duration)
+	return r.WaitForChangeRequestsWithContext(context.Background(), names, duration)
+}
+
+// WaitForChangeRequestsWithContext waits for change requests until notification, timeout, or context cancellation.
+func (r *Registry) WaitForChangeRequestsWithContext(ctx context.Context, names []string, duration time.Duration) map[string]any {
+	r.waitForNotificationWithContext(ctx, &r.changeRequestListeners, names, duration)
 
 	r.pendingRequestsMu.Lock()
 	defer r.pendingRequestsMu.Unlock()
