@@ -200,14 +200,14 @@ func (b *Browser) updateStatusBar() {
 			{"t", "Flat"},
 			{"e", "ExpandAll"},
 			{"c", "CollapseAll"},
-			{"q", "Quit"},
+			{"Esc", "Quit"},
 		},
 		false: {
 			{"m", "Meta"},
 			{"f", "Filter"},
 			{"↵", "Edit"},
 			{"t", "Tree"},
-			{"q", "Quit"},
+			{"Esc", "Quit"},
 		},
 	}
 
@@ -221,7 +221,8 @@ func (b *Browser) updateStatusBar() {
 
 func (b *Browser) setupKeyBindings() {
 	b.app.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
-		// Don't intercept events while editing or filtering
+		// Let active dialogs/overlays handle Escape themselves.
+		// Global Escape quits only when no dialog/overlay is active.
 		if b.editing || b.filtering {
 			return event
 		}
