@@ -627,8 +627,9 @@ func (b *Browser) editRegister() {
 		return
 	}
 
-	// Special case: if value is boolean or null, show boolean dialog
-	if _, ok := reg.Value.(bool); ok || reg.Value == nil {
+	// Special case: if value is boolean, show boolean dialog.
+	// Null values should use the JSON text editor.
+	if _, ok := reg.Value.(bool); ok {
 		b.showBooleanDialog(regName, reg.Value)
 		return
 	}
