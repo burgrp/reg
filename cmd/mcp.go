@@ -20,7 +20,6 @@ func newMCPCmd() *cobra.Command {
 
 The MCP server exposes tools for interacting with the registry:
 - get_register: Get a register's value and metadata
-- set_register: Set a register's value (provider operation)
 - list_registers: List all registers with their values
 - request_change: Request a value change (consumer operation)
 
@@ -57,7 +56,6 @@ func runMCP() error {
 
 	// Register tools
 	registerGetTool(server, regClient)
-	registerSetTool(server, regClient)
 	registerListTool(server, regClient)
 	registerRequestChangeTool(server, regClient)
 
@@ -73,13 +71,6 @@ func runMCP() error {
 
 type getRegisterArgs struct {
 	Name string `json:"name" jsonschema:"The name of the register to get"`
-}
-
-type setRegisterArgs struct {
-	Name     string         `json:"name" jsonschema:"The name of the register to set"`
-	Value    any            `json:"value" jsonschema:"The value to set (can be any JSON type)"`
-	Metadata map[string]any `json:"metadata,omitempty" jsonschema:"Optional metadata for the register"`
-	TTL      string         `json:"ttl,omitempty" jsonschema:"Optional TTL duration (e.g. '5s' '10m'). Default is 5s"`
 }
 
 type requestChangeArgs struct {
@@ -147,53 +138,6 @@ func registerGetTool(server *mcp.Server, regClient client.Client) {
 				IsError: true,
 			}, nil, nil
 		}
-	})
-}
-
-func registerSetTool(server *mcp.Server, regClient client.Client) {
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "set_register",
-		Description: "Set a register's value and metadata (provider operation)",
-	}, func(ctx context.Context, req *mcp.CallToolRequest, args setRegisterArgs) (*mcp.CallToolResult, any, error) {
-		// Parse TTL
-		ttlStr := args.TTL
-		if ttlStr == "" {
-			ttlStr = "5s"
-		}
-		ttl, err := time.ParseDuration(ttlStr)
-		if err != nil {
-			return &mcp.CallToolResult{
-				Content: []mcp.Content{
-					&mcp.TextContent{Text: fmt.Sprintf("Invalid TTL: %v", err)},
-				},
-				IsError: true,
-			}, nil, nil
-		}
-
-		metadata := args.Metadata
-		if metadata == nil {
-			metadata = make(map[string]any)
-		}
-
-		// Use Provide to set the register
-		updates, _, err := regClient.Provide(ctx, args.Name, args.Value, metadata, ttl)
-		if err != nil {
-			return &mcp.CallToolResult{
-				Content: []mcp.Content{
-					&mcp.TextContent{Text: fmt.Sprintf("Failed to provide: %v", err)},
-				},
-				IsError: true,
-			}, nil, nil
-		}
-
-		// Send the initial value
-		updates <- args.Value
-
-		return &mcp.CallToolResult{
-			Content: []mcp.Content{
-				&mcp.TextContent{Text: fmt.Sprintf("Register '%s' set to: %v", args.Name, args.Value)},
-			},
-		}, nil, nil
 	})
 }
 
