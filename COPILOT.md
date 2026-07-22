@@ -274,17 +274,12 @@ export REGISTRY=http://localhost:8080
    - Returns: Register value and metadata as text
    - Uses `Consume()` to get current value
 
-2. **`set_register`** - Set a register's value (provider operation)
-   - Input: `name` (string), `value` (any JSON type), `metadata` (object, optional), `ttl` (string, default "5s")
-   - Returns: Confirmation message
-   - Uses `Provide()` to create/update register with TTL
-
-3. **`list_registers`** - List all registers with their values
+2. **`list_registers`** - List all registers with their values
    - Input: None
    - Returns: Formatted list of all registers with values and metadata
    - Uses `ConsumeAll()` to get all current registers
 
-4. **`request_change`** - Request a value change (consumer operation)
+3. **`request_change`** - Request a value change (consumer operation)
    - Input: `name` (string), `value` (any JSON type)
    - Returns: Confirmation that request was sent
    - Uses `Consume()` to send change request to provider

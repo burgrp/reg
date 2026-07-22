@@ -113,7 +113,6 @@ export REGISTRY=http://localhost:8080
 
 # The MCP server exposes tools for AI assistants:
 # - get_register: Get register value and metadata
-# - set_register: Set register value (provider operation)
 # - list_registers: List all registers
 # - request_change: Request value change (consumer operation)
 ```
