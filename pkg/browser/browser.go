@@ -383,18 +383,15 @@ func (b *Browser) updateTreeView() {
 		parts := strings.Split(name, ".")
 		current := rootTree
 
-		for i, part := range parts {
-			if i == len(parts)-1 {
-				// Leaf node - store the register
-				current.Children[part] = &TreeNode{Register: reg}
-			} else {
-				// Intermediate node
-				if _, exists := current.Children[part]; !exists {
-					current.Children[part] = &TreeNode{Children: make(map[string]*TreeNode)}
-				}
-				current = current.Children[part]
+		for _, part := range parts {
+			child, exists := current.Children[part]
+			if !exists {
+				child = &TreeNode{Children: make(map[string]*TreeNode)}
+				current.Children[part] = child
 			}
+			current = child
 		}
+		current.Register = reg
 	}
 
 	b.buildTreeNodes(root, rootTree)
@@ -430,7 +427,6 @@ func (b *Browser) buildTreeNodes(parent *tview.TreeNode, tree *TreeNode) {
 			if !child.Register.RemovedAt.IsZero() {
 				foregroundColor = tcell.ColorRed
 			}
-			// Leaf node (actual register)
 			// Format value as JSON
 			valueBytes, err := json.Marshal(child.Register.Value)
 			var valueStr string
@@ -446,11 +442,12 @@ func (b *Browser) buildTreeNodes(parent *tview.TreeNode, tree *TreeNode) {
 			node.SetColor(foregroundColor)
 			node.SetReference(child.Register.Name)
 		} else {
-			// Intermediate node (folder)
 			node.SetColor(tcell.ColorSilver)
 			node.SetSelectable(true)
+		}
+
+		if len(child.Children) > 0 {
 			node.SetExpanded(true) // Start fully expanded
-			// Add children first
 			b.buildTreeNodes(node, child)
 		}
 
