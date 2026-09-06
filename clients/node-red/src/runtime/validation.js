@@ -19,7 +19,8 @@ function requireObject(value, fieldName) {
 function asInteger(value, fallback) {
   const n = Number(value)
   if (!Number.isFinite(n) || n <= 0) return fallback
-  return Math.floor(n)
+  const integer = Math.floor(n)
+  return integer > 0 ? integer : fallback
 }
 
 module.exports = {

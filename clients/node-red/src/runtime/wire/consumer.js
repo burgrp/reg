@@ -1,3 +1,22 @@
+function parseRegisters(body) {
+  if (body === null || typeof body !== 'object' || Array.isArray(body) ||
+      !Object.hasOwn(body, 'registers') || body.registers === null ||
+      typeof body.registers !== 'object' || Array.isArray(body.registers)) {
+    throw new Error('GET /consumer returned an invalid response')
+  }
+  for (const [name, register] of Object.entries(body.registers)) {
+    if (register === null || typeof register !== 'object' || Array.isArray(register) ||
+        !Object.hasOwn(register, 'value')) {
+      throw new Error(`GET /consumer returned an invalid register '${name}'`)
+    }
+    if (Object.hasOwn(register, 'metadata') &&
+        (register.metadata === null || typeof register.metadata !== 'object' || Array.isArray(register.metadata))) {
+      throw new Error(`GET /consumer returned invalid metadata for register '${name}'`)
+    }
+  }
+  return body.registers
+}
+
 class ConsumerClient {
   #baseURL
   #fetch
@@ -22,7 +41,7 @@ class ConsumerClient {
     }
 
     const body = await res.json()
-    return body.registers ?? {}
+  return parseRegisters(body)
   }
 
   async requestChanges(changes) {

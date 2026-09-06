@@ -94,7 +94,7 @@ func TestProviderBatchPolling(t *testing.T) {
 			t.Errorf("Expected temp change request 30.0, got %v", val)
 		}
 	case <-time.After(1 * time.Second):
-		// May not have received yet
+		t.Error("Timeout waiting for temp change request")
 	}
 
 	select {
@@ -103,7 +103,7 @@ func TestProviderBatchPolling(t *testing.T) {
 			t.Errorf("Expected humidity change request 70.0, got %v", val)
 		}
 	case <-time.After(1 * time.Second):
-		// May not have received yet
+		t.Error("Timeout waiting for humidity change request")
 	}
 }
 
@@ -163,6 +163,6 @@ func TestProviderBatchPolling_DynamicProviders(t *testing.T) {
 			t.Errorf("Expected humidity change request, got %v", val)
 		}
 	case <-time.After(1 * time.Second):
-		// May not have received update yet
+		t.Error("Timeout waiting for remaining provider change request")
 	}
 }

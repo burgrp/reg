@@ -29,7 +29,7 @@ func (d Duration) MarshalJSON() ([]byte, error) {
 
 // ConsumerGetRegister represents a register in consumer GET responses
 type ConsumerGetRegister struct {
-	Value    any            `json:"value,omitempty"`
+	Value    any            `json:"value"`
 	Metadata map[string]any `json:"metadata,omitempty"`
 }
 
@@ -40,7 +40,7 @@ type ConsumerGetResponse struct {
 
 // ConsumerPutRegister represents a register update request from a consumer
 type ConsumerPutRegister struct {
-	Value any `json:"value,omitempty"`
+	Value any `json:"value"`
 }
 
 // ConsumerPutRequest is the request format for consumer PUT requests
@@ -50,7 +50,7 @@ type ConsumerPutRequest struct {
 
 // ProviderPutRegister represents a register update from a provider
 type ProviderPutRegister struct {
-	Value    any            `json:"value,omitempty"`
+	Value    any            `json:"value"`
 	Metadata map[string]any `json:"metadata,omitempty"`
 	TTL      Duration       `json:"ttl,omitempty"`
 }
@@ -62,7 +62,7 @@ type ProviderPutRequest struct {
 
 // ProviderGetRegister represents a change request in provider GET responses
 type ProviderGetRegister struct {
-	Value any `json:"value,omitempty"`
+	Value any `json:"value"`
 }
 
 // ProviderGetResponse is the response format for provider GET requests

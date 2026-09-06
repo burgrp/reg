@@ -3,8 +3,12 @@
   "version": "0.1.0",
   "description": "Node-RED nodes for the reg IoT registry",
   "main": "nodes/reg-connection.js",
+  "files": [
+    "nodes",
+    "src"
+  ],
   "scripts": {
-    "test": "node --test"
+    "test": "node --test test/*.test.js"
   },
   "node-red": {
     "nodes": {

@@ -2,6 +2,7 @@ package rest
 
 import (
 	"context"
+	"fmt"
 	"reflect"
 	"time"
 
@@ -12,6 +13,9 @@ import (
 func (c *Client) Consume(ctx context.Context, name string) (<-chan client.ValueAndMetadata, chan<- any, error) {
 	c.consumerMu.Lock()
 	defer c.consumerMu.Unlock()
+	if _, exists := c.consumerSubs[name]; exists {
+		return nil, nil, fmt.Errorf("register %q already has an active consumer", name)
+	}
 
 	// Create subscription with its own context
 	subCtx, subCancel := context.WithCancel(context.Background())
@@ -23,42 +27,43 @@ func (c *Client) Consume(ctx context.Context, name string) (<-chan client.ValueA
 	}
 	c.consumerSubs[name] = sub
 
-	// Start batch poller if not running
-	if c.consumerBatchCtx == nil {
-		c.consumerBatchCtx, c.consumerBatchCxl = context.WithCancel(context.Background())
-		go c.consumerBatchPoller(c.consumerBatchCtx)
-	}
-
 	// Get initial value (no-wait)
 	sub.wg.Add(1)
 	go func() {
 		defer sub.wg.Done()
 
 		registers, err := c.consumerClient.GetRegisters(ctx, []string{name}, 0)
-		if err == nil {
-			if reg, exists := registers[name]; exists {
-				// Deep copy metadata to avoid shared references
-				var metadataCopy map[string]any
-				if reg.Metadata != nil {
-					metadataCopy = make(map[string]any, len(reg.Metadata))
-					for k, v := range reg.Metadata {
-						metadataCopy[k] = v
+		c.consumerMu.Lock()
+		if c.consumerSubs[name] == sub {
+			if err == nil {
+				if reg, exists := registers[name]; exists {
+					// Deep copy metadata to avoid shared references
+					var metadataCopy map[string]any
+					if reg.Metadata != nil {
+						metadataCopy = make(map[string]any, len(reg.Metadata))
+						for k, v := range reg.Metadata {
+							metadataCopy[k] = v
+						}
+					}
+
+					sub.lastValue = reg.Value
+					sub.lastMetadata = metadataCopy
+					sub.hasLastValue = true
+					value := client.ValueAndMetadata{Value: reg.Value, Metadata: metadataCopy}
+					select {
+					case sub.values <- value:
+					case <-sub.ctx.Done():
+					case <-ctx.Done():
 					}
 				}
-
-				// Track the value we're sending
-				c.consumerMu.Lock()
-				sub.lastValue = reg.Value
-				sub.lastMetadata = metadataCopy
-				c.consumerMu.Unlock()
-
-				select {
-				case sub.values <- client.ValueAndMetadata{Value: reg.Value, Metadata: metadataCopy}:
-				case <-sub.ctx.Done():
-				case <-ctx.Done():
-				}
+			}
+			sub.initialized = true
+			if c.consumerBatchCtx == nil {
+				c.consumerBatchCtx, c.consumerBatchCxl = context.WithCancel(context.Background())
+				go c.consumerBatchPoller(c.consumerBatchCtx)
 			}
 		}
+		c.consumerMu.Unlock()
 	}()
 
 	// Handle change requests
@@ -68,7 +73,9 @@ func (c *Client) Consume(ctx context.Context, name string) (<-chan client.ValueA
 	go func() {
 		<-ctx.Done()
 		c.consumerMu.Lock()
-		delete(c.consumerSubs, name)
+		if c.consumerSubs[name] == sub {
+			delete(c.consumerSubs, name)
+		}
 		c.consumerMu.Unlock()
 
 		// Cancel subscription context to signal senders to stop
@@ -109,14 +116,24 @@ func (c *Client) consumerBatchPoller(ctx context.Context) {
 
 		// Build list of names to poll
 		names := make([]string, 0, len(c.consumerSubs))
-		for name := range c.consumerSubs {
-			names = append(names, name)
+		for name, sub := range c.consumerSubs {
+			if sub.initialized {
+				names = append(names, name)
+			}
 		}
 		c.consumerMu.Unlock()
+		if len(names) == 0 {
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(10 * time.Millisecond):
+				continue
+			}
+		}
 
 		// Long poll for changes
 		pollInterval := c.ConsumerPollInterval
-		if pollInterval == 0 {
+		if pollInterval <= 0 {
 			pollInterval = 5 * time.Second
 		}
 		registers, err := c.consumerClient.GetRegisters(ctx, names, pollInterval)
@@ -127,10 +144,20 @@ func (c *Client) consumerBatchPoller(ctx context.Context) {
 
 		// Distribute updates to subscribers
 		c.consumerMu.Lock()
+		for _, name := range names {
+			if _, exists := registers[name]; exists {
+				continue
+			}
+			if sub, exists := c.consumerSubs[name]; exists {
+				sub.hasLastValue = false
+				sub.lastValue = nil
+				sub.lastMetadata = nil
+			}
+		}
 		for name, reg := range registers {
 			if sub, exists := c.consumerSubs[name]; exists {
 				// Only send if value or metadata actually changed
-				valueChanged := !reflect.DeepEqual(sub.lastValue, reg.Value)
+				valueChanged := !sub.hasLastValue || !reflect.DeepEqual(sub.lastValue, reg.Value)
 				metadataChanged := !reflect.DeepEqual(sub.lastMetadata, reg.Metadata)
 
 				if valueChanged || metadataChanged {
@@ -145,6 +172,7 @@ func (c *Client) consumerBatchPoller(ctx context.Context) {
 
 					sub.lastValue = reg.Value
 					sub.lastMetadata = metadataCopy
+					sub.hasLastValue = true
 					sub.wg.Add(1)
 					go func(s *consumerSubscription, val client.ValueAndMetadata) {
 						defer s.wg.Done()

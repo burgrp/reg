@@ -73,7 +73,7 @@ Content-Type: application/json
 **Fields:**
 - `registers` (required) - Map of register names to register data
   - `value` (required) - Any JSON-serializable value
-  - `metadata` (optional) - Object with string keys
+  - `metadata` (optional) - Object with string keys; supplying it replaces the current metadata
   - `ttl` (optional) - Duration string, defaults to 10 seconds if omitted
 
 **Response:**

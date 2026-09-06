@@ -9,12 +9,17 @@ import { ProviderClient } from './wire/provider.js'
  * @returns {number} milliseconds
  */
 function parseDuration(duration) {
+  if (typeof duration !== 'string' || duration.length === 0) {
+    throw new Error(`Invalid duration: "${duration}"`)
+  }
+
   let ms = 0
-  const re = /(\d+(?:\.\d+)?)(ms|s|m|h)/g
-  let match
-  let matched = false
-  while ((match = re.exec(duration)) !== null) {
-    matched = true
+  let index = 0
+  const re = /(\d+(?:\.\d+)?)(ms|s|m|h)/gy
+  while (index < duration.length) {
+    re.lastIndex = index
+    const match = re.exec(duration)
+    if (!match) throw new Error(`Invalid duration: "${duration}"`)
     const val = parseFloat(match[1])
     switch (match[2]) {
       case 'ms': ms += val; break
@@ -22,8 +27,9 @@ function parseDuration(duration) {
       case 'm':  ms += val * 60 * 1000; break
       case 'h':  ms += val * 60 * 60 * 1000; break
     }
+    index = re.lastIndex
   }
-  if (!matched) throw new Error(`Invalid duration: "${duration}"`)
+  if (!Number.isFinite(ms) || ms <= 0) throw new Error(`Invalid duration: "${duration}"`)
   return ms
 }
 
@@ -46,6 +52,13 @@ function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms))
 }
 
+function validatePollInterval(value, name) {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
+    throw new Error(`${name} must be a positive finite number`)
+  }
+  return value
+}
+
 // ─── Subscription classes ────────────────────────────────────────────────────
 
 /**
@@ -61,6 +74,7 @@ export class ConsumerSubscription extends EventEmitter {
   #client
   #name
   #stopped = false
+  #hasValue = false
 
   constructor(client, name) {
     super()
@@ -70,13 +84,21 @@ export class ConsumerSubscription extends EventEmitter {
 
   get name() { return this.#name }
   get stopped() { return this.#stopped }
+  get _hasValue() { return this.#hasValue }
+
+  _emitValue(value) {
+    if (this.#stopped) return
+    this.#hasValue = true
+    this.emit('value', value)
+  }
 
   /**
    * Send a change request to the provider.
    * @param {any} value - Requested new value
+   * @returns {Promise<void>}
    */
   request(value) {
-    this.#client._requestChange(this.#name, value)
+    return this.#client._requestChange(this.#name, value)
   }
 
   /**
@@ -93,7 +115,7 @@ export class ConsumerSubscription extends EventEmitter {
  * Represents a subscription to all registers.
  *
  * Events:
- *   'update' ({name, value, metadata}) - emitted when any register changes
+ *   'update' ({name, value, metadata, removed?}) - emitted when a register changes or expires
  *   'error'  (err)                     - emitted on unrecoverable errors
  *
  * @extends EventEmitter
@@ -101,6 +123,7 @@ export class ConsumerSubscription extends EventEmitter {
 export class ConsumeAllSubscription extends EventEmitter {
   #client
   #stopped = false
+  #lastValues = new Map()
 
   constructor(client) {
     super()
@@ -109,13 +132,30 @@ export class ConsumeAllSubscription extends EventEmitter {
 
   get stopped() { return this.#stopped }
 
+  _hasRegister(name, register) {
+    const last = this.#lastValues.get(name)
+    return last != null && deepEqual(last.value, register.value) && deepEqual(last.metadata, register.metadata)
+  }
+
+  _hasRegisterName(name) {
+    return this.#lastValues.has(name)
+  }
+
+  _emitUpdate(update, register = null) {
+    if (this.#stopped) return
+    if (update.removed) this.#lastValues.delete(update.name)
+    else this.#lastValues.set(update.name, register)
+    this.emit('update', update)
+  }
+
   /**
    * Send a change request to the provider of the named register.
    * @param {string} name - Register name
    * @param {any} value - Requested new value
+   * @returns {Promise<void>}
    */
   request(name, value) {
-    this.#client._requestChange(name, value)
+    return this.#client._requestChange(name, value)
   }
 
   /**
@@ -157,7 +197,8 @@ export class ProviderSubscription extends EventEmitter {
    * @returns {Promise<void>}
    */
   async update(value) {
-    await this.#client._updateProvider(this.#name, value)
+    if (this.#stopped) throw new Error(`Provider for register '${this.#name}' is stopped`)
+    await this.#client._updateProvider(this.#name, this, value)
   }
 
   /**
@@ -166,7 +207,7 @@ export class ProviderSubscription extends EventEmitter {
   stop() {
     if (this.#stopped) return
     this.#stopped = true
-    this.#client._removeProvider(this.#name)
+    this.#client._removeProvider(this.#name, this)
   }
 }
 
@@ -200,17 +241,20 @@ export class Client {
   // Consumer batching state
   #consumerSubs = new Map()       // name -> Set<ConsumerSubscription>
   #consumerLastValues = new Map() // name -> { value, metadata }
+  #consumerRevisions = new Map()  // name -> latest completed snapshot generation
   #consumerPolling = false
   #consumerAbort = null           // AbortController for in-flight poll
 
   // ConsumeAll state
   #consumeAllSubs = new Set()     // Set<ConsumeAllSubscription>
   #consumeAllLastValues = new Map() // name -> { value, metadata }
+  #consumeAllRevision = 0
   #consumeAllPolling = false
   #consumeAllAbort = null         // AbortController for in-flight poll
 
   // Provider batching state
   #providerStates = new Map()     // name -> { sub, value, metadata, ttl, refreshTimer }
+  #providerClosing = new Set()
   #providerPolling = false
   #providerAbort = null           // AbortController for in-flight poll
 
@@ -225,8 +269,14 @@ export class Client {
     const fetchFn = options.fetch ?? globalThis.fetch
     this.#consumerWire = new ConsumerClient(baseURL, fetchFn)
     this.#providerWire = new ProviderClient(baseURL, fetchFn)
-    this.consumerPollInterval = options.consumerPollInterval ?? 5000
-    this.providerPollInterval = options.providerPollInterval ?? 30000
+    this.consumerPollInterval = validatePollInterval(
+      options.consumerPollInterval ?? 5000,
+      'consumerPollInterval'
+    )
+    this.providerPollInterval = validatePollInterval(
+      options.providerPollInterval ?? 30000,
+      'providerPollInterval'
+    )
   }
 
   // ─── consume() ─────────────────────────────────────────────────────────────
@@ -249,12 +299,13 @@ export class Client {
     this.#consumerSubs.get(name).add(sub)
 
     // Create session abort controller before the initial fetch so it can be cancelled
-    if (!this.#consumerAbort) {
+    if (!this.#consumerAbort || this.#consumerAbort.signal.aborted) {
       this.#consumerAbort = new AbortController()
     }
 
     // Fetch initial value immediately (non-blocking), using session signal
-    this.#fetchInitial(name, sub, this.#consumerAbort.signal)
+    const revision = this.#consumerRevisions.get(name) ?? 0
+    this.#fetchInitial(name, sub, this.#consumerAbort.signal, revision)
 
     // Start shared polling loop if not already running
     this.#ensureConsumerPolling()
@@ -262,13 +313,24 @@ export class Client {
     return sub
   }
 
-  async #fetchInitial(name, sub, signal) {
+  async #fetchInitial(name, sub, signal, revision) {
     try {
       const registers = await this.#consumerWire.getRegisters([name], null, signal)
-      if (name in registers && !sub.stopped) {
-        const reg = registers[name]
-        this.#consumerLastValues.set(name, reg)
-        sub.emit('value', { value: reg.value, metadata: reg.metadata ?? {} })
+      if (sub.stopped || (this.#consumerRevisions.get(name) ?? 0) !== revision) return
+
+      this.#consumerRevisions.set(name, revision + 1)
+      if (!Object.hasOwn(registers, name)) {
+        this.#consumerLastValues.delete(name)
+        return
+      }
+
+      const reg = registers[name]
+      const last = this.#consumerLastValues.get(name)
+      const changed = !last || !deepEqual(reg.value, last.value) || !deepEqual(reg.metadata, last.metadata)
+      this.#consumerLastValues.set(name, reg)
+      const update = { value: reg.value, metadata: reg.metadata ?? {} }
+      for (const candidate of this.#consumerSubs.get(name) ?? []) {
+        if (changed || !candidate._hasValue) candidate._emitValue(update)
       }
     } catch {
       // Silently ignore initial fetch errors (including AbortError); polling will retry
@@ -277,47 +339,54 @@ export class Client {
 
   #ensureConsumerPolling() {
     if (this.#consumerPolling) return
+    if (!this.#consumerAbort || this.#consumerAbort.signal.aborted) {
+      this.#consumerAbort = new AbortController()
+    }
+    const controller = this.#consumerAbort
     this.#consumerPolling = true
-    this.#runConsumerLoop()
+    this.#runConsumerLoop(controller)
   }
 
-  async #runConsumerLoop() {
+  async #runConsumerLoop(controller) {
     const waitStr = `${this.consumerPollInterval / 1000}s`
     while (this.#consumerSubs.size > 0) {
-      const signal = this.#consumerAbort?.signal
       const names = [...this.#consumerSubs.keys()]
       try {
-        const registers = await this.#consumerWire.getRegisters(names, waitStr, signal)
-        this.#distributeConsumerUpdates(registers)
+        const registers = await this.#consumerWire.getRegisters(names, waitStr, controller.signal)
+        this.#distributeConsumerUpdates(registers, names)
       } catch (err) {
         if (err?.name === 'AbortError') break
         await sleep(1000)
       }
     }
-    this.#consumerAbort = null
+    if (this.#consumerAbort === controller) this.#consumerAbort = null
     this.#consumerPolling = false
+    if (this.#consumerSubs.size > 0) this.#ensureConsumerPolling()
   }
 
-  #distributeConsumerUpdates(registers) {
+  #distributeConsumerUpdates(registers, requestedNames) {
+    for (const name of requestedNames) {
+      this.#consumerRevisions.set(name, (this.#consumerRevisions.get(name) ?? 0) + 1)
+      if (!Object.hasOwn(registers, name)) this.#consumerLastValues.delete(name)
+    }
+
     for (const [name, reg] of Object.entries(registers)) {
       const subs = this.#consumerSubs.get(name)
       if (!subs || subs.size === 0) continue
 
       const last = this.#consumerLastValues.get(name)
-      if (last && deepEqual(reg.value, last.value) && deepEqual(reg.metadata, last.metadata)) {
-        continue // No change
-      }
+      const changed = !last || !deepEqual(reg.value, last.value) || !deepEqual(reg.metadata, last.metadata)
 
       this.#consumerLastValues.set(name, reg)
       const update = { value: reg.value, metadata: reg.metadata ?? {} }
       for (const sub of subs) {
-        if (!sub.stopped) sub.emit('value', update)
+        if (changed || !sub._hasValue) sub._emitValue(update)
       }
     }
   }
 
   _requestChange(name, value) {
-    this.#consumerWire.requestChanges({ [name]: value }).catch(() => {})
+    return this.#consumerWire.requestChanges({ [name]: value })
   }
 
   _removeConsumer(name, sub) {
@@ -327,6 +396,7 @@ export class Client {
     if (subs.size === 0) {
       this.#consumerSubs.delete(name)
       this.#consumerLastValues.delete(name)
+      this.#consumerRevisions.set(name, (this.#consumerRevisions.get(name) ?? 0) + 1)
     }
     if (this.#consumerSubs.size === 0) {
       this.#consumerAbort?.abort()
@@ -347,12 +417,12 @@ export class Client {
     const sub = new ConsumeAllSubscription(this)
     this.#consumeAllSubs.add(sub)
 
-    if (!this.#consumeAllAbort) {
+    if (!this.#consumeAllAbort || this.#consumeAllAbort.signal.aborted) {
       this.#consumeAllAbort = new AbortController()
     }
 
     // Fetch all current registers immediately using session signal
-    this.#fetchAllInitial(sub, this.#consumeAllAbort.signal)
+    this.#fetchAllInitial(sub, this.#consumeAllAbort.signal, this.#consumeAllRevision)
 
     // Start polling loop if not already running
     this.#ensureConsumeAllPolling()
@@ -360,14 +430,12 @@ export class Client {
     return sub
   }
 
-  async #fetchAllInitial(sub, signal) {
+  async #fetchAllInitial(sub, signal, revision) {
     try {
       const registers = await this.#consumerWire.getRegisters([], null, signal)
-      if (sub.stopped) return
-      for (const [name, reg] of Object.entries(registers)) {
-        this.#consumeAllLastValues.set(name, reg)
-        sub.emit('update', { name, value: reg.value, metadata: reg.metadata ?? {} })
-      }
+      if (sub.stopped || this.#consumeAllRevision !== revision) return
+      this.#consumeAllRevision++
+      this.#applyConsumeAllSnapshot(registers)
     } catch {
       // Silently ignore initial fetch errors (including AbortError)
     }
@@ -375,40 +443,57 @@ export class Client {
 
   #ensureConsumeAllPolling() {
     if (this.#consumeAllPolling) return
+    if (!this.#consumeAllAbort || this.#consumeAllAbort.signal.aborted) {
+      this.#consumeAllAbort = new AbortController()
+    }
+    const controller = this.#consumeAllAbort
     this.#consumeAllPolling = true
-    this.#runConsumeAllLoop()
+    this.#runConsumeAllLoop(controller)
   }
 
-  async #runConsumeAllLoop() {
+  async #runConsumeAllLoop(controller) {
     const waitStr = `${this.consumerPollInterval / 1000}s`
     while (this.#consumeAllSubs.size > 0) {
-      const signal = this.#consumeAllAbort?.signal
       try {
-        const registers = await this.#consumerWire.getRegisters([], waitStr, signal)
-        for (const [name, reg] of Object.entries(registers)) {
-          const last = this.#consumeAllLastValues.get(name)
-          if (last && deepEqual(reg.value, last.value) && deepEqual(reg.metadata, last.metadata)) {
-            continue
-          }
-          this.#consumeAllLastValues.set(name, reg)
-          const update = { name, value: reg.value, metadata: reg.metadata ?? {} }
-          for (const sub of this.#consumeAllSubs) {
-            if (!sub.stopped) sub.emit('update', update)
-          }
-        }
+        const registers = await this.#consumerWire.getRegisters([], waitStr, controller.signal)
+        this.#consumeAllRevision++
+        this.#applyConsumeAllSnapshot(registers)
       } catch (err) {
         if (err?.name === 'AbortError') break
         await sleep(1000)
       }
     }
-    this.#consumeAllAbort = null
+    if (this.#consumeAllAbort === controller) this.#consumeAllAbort = null
     this.#consumeAllPolling = false
-    this.#consumeAllLastValues.clear()
+    if (this.#consumeAllSubs.size > 0) this.#ensureConsumeAllPolling()
+    else this.#consumeAllLastValues.clear()
+  }
+
+  #applyConsumeAllSnapshot(registers) {
+    const seen = new Set(Object.keys(registers))
+    for (const [name, reg] of Object.entries(registers)) {
+      const last = this.#consumeAllLastValues.get(name)
+      const changed = !last || !deepEqual(reg.value, last.value) || !deepEqual(reg.metadata, last.metadata)
+      this.#consumeAllLastValues.set(name, reg)
+      const update = { name, value: reg.value, metadata: reg.metadata ?? {} }
+      for (const sub of this.#consumeAllSubs) {
+        if (changed || !sub._hasRegister(name, reg)) sub._emitUpdate(update, reg)
+      }
+    }
+    for (const name of this.#consumeAllLastValues.keys()) {
+      if (seen.has(name)) continue
+      this.#consumeAllLastValues.delete(name)
+      const update = { name, removed: true }
+      for (const sub of this.#consumeAllSubs) {
+        if (sub._hasRegisterName(name)) sub._emitUpdate(update)
+      }
+    }
   }
 
   _removeConsumeAll(sub) {
     this.#consumeAllSubs.delete(sub)
     if (this.#consumeAllSubs.size === 0) {
+      this.#consumeAllRevision++
       this.#consumeAllAbort?.abort()
     }
   }
@@ -427,64 +512,87 @@ export class Client {
    * @param {Object} [metadata={}] - Register metadata
    * @param {string} [ttl='5s'] - TTL as Go duration string (e.g. "5s", "10m")
    * @returns {ProviderSubscription}
+  * @throws {Error} If the TTL is invalid or the register already has an active provider
    */
   provide(name, value, metadata = {}, ttl = '5s') {
-    // Fire-and-forget initial set; errors are silently ignored (registry may be unavailable).
-    // The refresh timer will retry until the registry is reachable.
-    this.#providerWire.setRegisters({ [name]: { value, metadata, ttl } }).catch(() => {})
+    const ttlMs = parseDuration(ttl)
+    if (this.#providerStates.has(name) || this.#providerClosing.has(name)) {
+      throw new Error(`Register '${name}' already has an active provider`)
+    }
 
     const sub = new ProviderSubscription(this, name)
-    const ttlMs = parseDuration(ttl)
 
     const state = {
       sub,
       value,
       metadata,
       ttl,
-      refreshTimer: setInterval(async () => {
-        if (sub.stopped) return
-        try {
-          await this.#providerWire.setRegisters({
-            [name]: { value: state.value, metadata: state.metadata, ttl },
-          })
-        } catch {
-          // Ignore refresh errors; will retry on next interval
-        }
-      }, ttlMs / 2),
+      controller: new AbortController(),
+      writeChain: null,
+      refreshQueued: false,
+      refreshTimer: null,
     }
 
     this.#providerStates.set(name, state)
+    this.#queueProviderWrite(state).catch(() => {})
+    state.refreshTimer = setInterval(() => {
+      if (sub.stopped || state.refreshQueued) return
+      state.refreshQueued = true
+      this.#queueProviderWrite(state)
+        .catch(() => {})
+        .finally(() => { state.refreshQueued = false })
+    }, ttlMs / 2)
     this.#ensureProviderPolling()
 
     return sub
   }
 
-  async _updateProvider(name, value) {
+  async _updateProvider(name, sub, value) {
     const state = this.#providerStates.get(name)
-    if (!state) throw new Error(`No active provider for register '${name}'`)
+    if (!state || state.sub !== sub) throw new Error(`No active provider for register '${name}'`)
     state.value = value
     try {
-      await this.#providerWire.setRegisters({
-        [name]: { value, metadata: state.metadata, ttl: state.ttl },
-      })
+      await this.#queueProviderWrite(state)
     } catch {
       // Registry unavailable; refresh timer will send the updated value when reconnected
     }
   }
 
-  #ensureProviderPolling() {
-    if (this.#providerPolling) return
-    this.#providerPolling = true
-    this.#runProviderLoop()
+  #queueProviderWrite(state) {
+    const performWrite = async () => {
+      if (this.#providerStates.get(state.sub.name) !== state || state.sub.stopped) return
+      await this.#providerWire.setRegisters({
+        [state.sub.name]: {
+          value: state.value,
+          metadata: state.metadata,
+          ttl: state.ttl,
+        },
+      }, state.controller.signal)
+    }
+    const write = state.writeChain
+      ? state.writeChain.catch(() => {}).then(performWrite)
+      : performWrite()
+    state.writeChain = write
+    write.finally(() => {
+      if (state.writeChain === write) state.writeChain = null
+    }).catch(() => {})
+    return write
   }
 
-  async #runProviderLoop() {
+  #ensureProviderPolling() {
+    if (this.#providerPolling) return
+    const controller = new AbortController()
+    this.#providerAbort = controller
+    this.#providerPolling = true
+    this.#runProviderLoop(controller)
+  }
+
+  async #runProviderLoop(controller) {
     const waitStr = `${this.providerPollInterval / 1000}s`
     while (this.#providerStates.size > 0) {
-      this.#providerAbort = new AbortController()
       const names = [...this.#providerStates.keys()]
       try {
-        const requests = await this.#providerWire.getChangeRequests(names, waitStr, this.#providerAbort.signal)
+        const requests = await this.#providerWire.getChangeRequests(names, waitStr, controller.signal)
         for (const [name, requestedValue] of Object.entries(requests)) {
           const state = this.#providerStates.get(name)
           if (state && !state.sub.stopped) {
@@ -496,15 +604,21 @@ export class Client {
         await sleep(1000)
       }
     }
-    this.#providerAbort = null
+    if (this.#providerAbort === controller) this.#providerAbort = null
     this.#providerPolling = false
+    if (this.#providerStates.size > 0) this.#ensureProviderPolling()
   }
 
-  _removeProvider(name) {
+  _removeProvider(name, sub) {
     const state = this.#providerStates.get(name)
-    if (!state) return
+    if (!state || state.sub !== sub) return
     clearInterval(state.refreshTimer)
     this.#providerStates.delete(name)
+    state.controller.abort()
+    if (state.writeChain) {
+      this.#providerClosing.add(name)
+      state.writeChain.catch(() => {}).finally(() => this.#providerClosing.delete(name))
+    }
     if (this.#providerStates.size === 0) {
       this.#providerAbort?.abort()
     }

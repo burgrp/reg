@@ -4,7 +4,9 @@ Guide for building, testing, and contributing to Registry.
 
 ## Prerequisites
 
-- Go 1.21 or later
+- Go version declared in `go.mod`
+- Node.js 18 or later
+- Python 3.10 or later
 - Git
 - Make (optional, for convenience)
 
@@ -55,6 +57,19 @@ go test -coverprofile=coverage.out ./...
 go tool cover -html=coverage.out
 ```
 
+Run the client library suites:
+
+```bash
+npm --prefix clients/js test
+npm --prefix clients/node-red test
+
+python -m pip install -e './clients/python[dev]'
+python -m unittest discover -s clients/python/test -v
+ruff check clients/python
+ruff format --check clients/python
+mypy clients/python/src
+```
+
 ### Run Server Locally
 
 ```bash
@@ -101,6 +116,7 @@ reg/
 │   │   └── rest/          # Low-level REST clients
 │   └── browser/           # TUI browser
 ├── docs/                  # Documentation
+├── clients/               # JavaScript, Node-RED, and Python clients
 ├── main.go                # Entry point
 ├── go.mod                 # Go modules
 └── build.sh               # Release build script

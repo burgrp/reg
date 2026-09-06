@@ -81,7 +81,7 @@ sub.on('value', ({ value, metadata }) => {
 })
 
 // Request a value change from the provider
-sub.request(22.0)
+await sub.request(22.0)
 
 // Stop receiving updates
 sub.stop()
@@ -100,21 +100,26 @@ initial fetch, then emits for each changed register on every poll.
 ```js
 const sub = client.consumeAll()
 
-sub.on('update', ({ name, value, metadata }) => {
+sub.on('update', ({ name, value, metadata, removed }) => {
+  if (removed) {
+    console.log(name, 'expired')
+    return
+  }
   console.log(name, '=', value)
 })
 
 // Request a value change for a specific register by name
-sub.request('temperature', 22.0)
+await sub.request('temperature', 22.0)
 
 sub.stop()
 ```
 
 **Events:**
-* `'update'` – `{ name, value, metadata }` – emitted for each changed register
+* `'update'` – `{ name, value, metadata }` for a changed register
+* `'update'` – `{ name, removed: true }` when a register expires
 
 **Methods:**
-* `request(name, value)` – send a change request to the provider of the named register
+* `request(name, value)` – return a Promise that sends a change request to the provider
 
 ---
 
@@ -122,7 +127,7 @@ sub.stop()
 
 Publish a register and keep it alive. Sets the register immediately, then
 continuously refreshes the TTL so it does not expire while the provider is
-running.
+running. Only one active provider per register is allowed on a client instance.
 
 ```js
 const pub = client.provide(

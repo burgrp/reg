@@ -40,6 +40,8 @@ type consumerSubscription struct {
 	wg           sync.WaitGroup // tracks active senders to channels
 	lastValue    any
 	lastMetadata map[string]any
+	hasLastValue bool
+	initialized  bool
 }
 
 type providerSubscription struct {

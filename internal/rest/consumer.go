@@ -7,7 +7,7 @@ import (
 
 // ConsumerGetRegister represents a register in consumer GET responses
 type ConsumerGetRegister struct {
-	Value    any            `json:"value,omitempty"`
+	Value    any            `json:"value"`
 	Metadata map[string]any `json:"metadata,omitempty"`
 }
 
@@ -18,7 +18,23 @@ type ConsumerGetResponse struct {
 
 // ConsumerPutRegister represents a register update request from a consumer
 type ConsumerPutRegister struct {
-	Value any `json:"value,omitempty"`
+	Value        any `json:"value"`
+	valuePresent bool
+}
+
+func (r *ConsumerPutRegister) UnmarshalJSON(data []byte) error {
+	type registerAlias ConsumerPutRegister
+	var value registerAlias
+	if err := json.Unmarshal(data, &value); err != nil {
+		return err
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	*r = ConsumerPutRegister(value)
+	_, r.valuePresent = fields["value"]
+	return nil
 }
 
 // ConsumerPutRequest is the request format for consumer PUT requests
@@ -62,6 +78,16 @@ func (s *Server) handleConsumer(w http.ResponseWriter, r *http.Request) {
 			s.logger.Error("failed to decode request", "error", err)
 			http.Error(w, "invalid request", http.StatusBadRequest)
 			return
+		}
+		if req.Registers == nil {
+			http.Error(w, "registers is required", http.StatusBadRequest)
+			return
+		}
+		for _, reg := range req.Registers {
+			if !reg.valuePresent {
+				http.Error(w, "register value is required", http.StatusBadRequest)
+				return
+			}
 		}
 
 		for name, reg := range req.Registers {

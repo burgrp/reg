@@ -65,3 +65,36 @@ test('ProviderClient setRegisters and getChangeRequests', async () => {
   assert.equal(calls[0].opts.method, 'PUT')
   assert.match(calls[1].url, /\/provider\?name=temperature&wait=30s/)
 })
+
+test('wire clients reject malformed successful responses', async () => {
+  const consumer = new ConsumerClient('http://localhost:8080', async () => ({
+    ok: true,
+    status: 200,
+    async json() { return { registers: { temp: {} } } },
+  }))
+  await assert.rejects(() => consumer.getRegisters(['temp']), /invalid/)
+
+  const provider = new ProviderClient('http://localhost:8080', async () => ({
+    ok: true,
+    status: 200,
+    async json() { return {} },
+  }))
+  await assert.rejects(() => provider.getChangeRequests(['temp']), /invalid/)
+})
+
+test('wire clients preserve prototype-like register names', async () => {
+  const body = JSON.parse('{"registers":{"toString":{"value":1},"__proto__":{"value":2}}}')
+  const response = async () => ({
+    ok: true,
+    status: 200,
+    async json() { return body },
+  })
+
+  const consumer = await new ConsumerClient('http://localhost:8080', response).getRegisters()
+  const requests = await new ProviderClient('http://localhost:8080', response).getChangeRequests()
+
+  assert.equal(Object.hasOwn(consumer, '__proto__'), true)
+  assert.equal(Object.hasOwn(requests, '__proto__'), true)
+  assert.equal(consumer.toString.value, 1)
+  assert.equal(requests.__proto__, 2)
+})

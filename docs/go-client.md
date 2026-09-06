@@ -223,6 +223,9 @@ values3, _, _ := client.Consume(ctx, "pressure")
 // Only one HTTP request is made for all three registers
 ```
 
+A client instance permits one active `Consume` subscription per register name.
+Cancel its context before subscribing to the same name again.
+
 ## Provider API
 
 ### Provide Method
@@ -241,7 +244,7 @@ Provide(ctx context.Context, name string, value any,
 - `name` - Register name
 - `value` - Initial value (any JSON-serializable type)
 - `metadata` - Optional metadata map
-- `ttl` - Time-to-live duration
+- `ttl` - Positive time-to-live duration; it must be large enough to schedule a refresh at `ttl / 2`
 
 **Returns:**
 - `updates` - Send-only channel to update register value
@@ -332,6 +335,9 @@ updates3, reqs3, _ := client.Provide(ctx, "pressure", 1013.0, nil, 10*time.Secon
 // All providers share a single batch poller
 // Only one HTTP request is made for all three registers
 ```
+
+A client instance permits one active provider per register name. Cancel its
+context and wait for cleanup before providing that name again.
 
 ## Batch Optimization
 

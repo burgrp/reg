@@ -171,6 +171,7 @@ curl -X PUT http://localhost:8080/consumer \
 - [Go Client Library](docs/go-client.md) - Using the Go client library
 - [JavaScript Client](clients/js/README.md) - JavaScript/Node.js client library
 - [Node-RED Library](clients/node-red/README.md) - Node-RED nodes for registry flows
+- [Python Client](clients/python/README.md) - Typed async Python client library
 - [Client Examples](docs/examples.md) - Code examples for common use cases
 
 ### Development

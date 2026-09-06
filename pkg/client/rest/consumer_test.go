@@ -46,6 +46,84 @@ func TestClient_Consume_InitialValue(t *testing.T) {
 	}
 }
 
+func TestClient_Consume_WaitsForInitialBeforePolling(t *testing.T) {
+	initialStarted := make(chan struct{})
+	initialRelease := make(chan struct{})
+	pollStarted := make(chan struct{}, 1)
+	pollResponse := make(chan float64, 1)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("wait") == "" {
+			close(initialStarted)
+			select {
+			case <-initialRelease:
+				json.NewEncoder(w).Encode(rest.ConsumerGetResponse{
+					Registers: map[string]rest.ConsumerGetRegister{"temp": {Value: 1.0}},
+				})
+			case <-r.Context().Done():
+			}
+			return
+		}
+		select {
+		case pollStarted <- struct{}{}:
+		default:
+		}
+		select {
+		case value := <-pollResponse:
+			json.NewEncoder(w).Encode(rest.ConsumerGetResponse{
+				Registers: map[string]rest.ConsumerGetRegister{"temp": {Value: value}},
+			})
+		case <-r.Context().Done():
+		}
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	values, _, err := client.Consume(ctx, "temp")
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+	<-initialStarted
+
+	select {
+	case <-pollStarted:
+		t.Fatal("poll started before the initial snapshot completed")
+	case <-time.After(30 * time.Millisecond):
+	}
+	close(initialRelease)
+	if value := <-values; value.Value != 1.0 {
+		t.Fatalf("Expected initial value 1, got %v", value.Value)
+	}
+	select {
+	case <-pollStarted:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("poll did not start after the initial snapshot")
+	}
+	pollResponse <- 2.0
+	if value := <-values; value.Value != 2.0 {
+		t.Fatalf("Expected polled value 2, got %v", value.Value)
+	}
+}
+
+func TestClient_Consume_RejectsDuplicateName(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(rest.ConsumerGetResponse{Registers: map[string]rest.ConsumerGetRegister{}})
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if _, _, err := client.Consume(ctx, "temp"); err != nil {
+		t.Fatalf("Unexpected first consumer error: %v", err)
+	}
+	if _, _, err := client.Consume(ctx, "temp"); err == nil {
+		t.Fatal("Expected duplicate consumer to be rejected")
+	}
+}
+
 func TestClient_Consume_LongPolling(t *testing.T) {
 	callCount := atomic.Int32{}
 
@@ -88,6 +166,56 @@ func TestClient_Consume_LongPolling(t *testing.T) {
 	// Should have received at least 2 different values
 	if len(receivedValues) < 2 {
 		t.Errorf("Expected at least 2 different values, got %d", len(receivedValues))
+	}
+}
+
+func TestClient_Consume_RecreatedRegisterWithSameValue(t *testing.T) {
+	pollResponses := make(chan rest.ConsumerGetResponse)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("wait") == "" {
+			json.NewEncoder(w).Encode(rest.ConsumerGetResponse{
+				Registers: map[string]rest.ConsumerGetRegister{"temp": {Value: 20.0}},
+			})
+			return
+		}
+		select {
+		case response := <-pollResponses:
+			json.NewEncoder(w).Encode(response)
+		case <-r.Context().Done():
+			return
+		}
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	values, _, err := client.Consume(ctx, "temp")
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	select {
+	case value := <-values:
+		if value.Value != 20.0 {
+			t.Fatalf("Expected initial value 20, got %v", value.Value)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("Timeout waiting for initial value")
+	}
+
+	pollResponses <- rest.ConsumerGetResponse{Registers: map[string]rest.ConsumerGetRegister{}}
+	pollResponses <- rest.ConsumerGetResponse{
+		Registers: map[string]rest.ConsumerGetRegister{"temp": {Value: 20.0}},
+	}
+
+	select {
+	case value := <-values:
+		if value.Value != 20.0 {
+			t.Fatalf("Expected recreated value 20, got %v", value.Value)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("Timeout waiting for recreated value")
 	}
 }
 

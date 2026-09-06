@@ -181,6 +181,38 @@ func TestDuration_InStruct(t *testing.T) {
 	}
 }
 
+func TestPutRegisters_MarshalExplicitNullValue(t *testing.T) {
+	tests := []struct {
+		name  string
+		value any
+	}{
+		{
+			name: "consumer",
+			value: ConsumerPutRequest{Registers: map[string]ConsumerPutRegister{
+				"temp": {Value: nil},
+			}},
+		},
+		{
+			name: "provider",
+			value: ProviderPutRequest{Registers: map[string]ProviderPutRegister{
+				"temp": {Value: nil},
+			}},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			body, err := json.Marshal(tt.value)
+			if err != nil {
+				t.Fatalf("Failed to marshal request: %v", err)
+			}
+			if string(body) != `{"registers":{"temp":{"value":null}}}` {
+				t.Fatalf("Expected explicit null value, got %s", body)
+			}
+		})
+	}
+}
+
 func BenchmarkDuration_UnmarshalJSON(b *testing.B) {
 	input := []byte(`"5s"`)
 

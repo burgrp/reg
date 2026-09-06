@@ -13,18 +13,20 @@ import { Client } from '../src/client.js'
 function createControllableFetch() {
   const queue = []
 
-  const fetchFn = (_url, options) =>
+  const fetchFn = (url, options) =>
     new Promise((resolve, reject) => {
-      const entry = { resolve, reject }
+      const entry = { url: url.toString(), resolve, reject }
       queue.push(entry)
       // Respect AbortSignal so polling loops can exit cleanly
-      options?.signal?.addEventListener('abort', () => {
+      const abort = () => {
         const idx = queue.indexOf(entry)
         if (idx !== -1) queue.splice(idx, 1)
         const err = new Error('The operation was aborted')
         err.name = 'AbortError'
         reject(err)
-      })
+      }
+      if (options?.signal?.aborted) abort()
+      else options?.signal?.addEventListener('abort', abort, { once: true })
     })
 
   const respond = (body, status = 200) => {
@@ -45,14 +47,28 @@ function createControllableFetch() {
   }
 
   const pendingCount = () => queue.length
+  const pendingURLs = () => queue.map(entry => entry.url)
 
-  return { fetchFn, respond, respondError, pendingCount }
+  return { fetchFn, respond, respondError, pendingCount, pendingURLs }
 }
 
 /** Wait for the event loop to drain so async operations can progress */
 const tick = () => new Promise(resolve => setImmediate(resolve))
 
 describe('Client', () => {
+  it('rejects invalid polling intervals', () => {
+    for (const value of [0, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
+      assert.throws(
+        () => new Client('http://localhost:8080', { consumerPollInterval: value }),
+        /consumerPollInterval/
+      )
+      assert.throws(
+        () => new Client('http://localhost:8080', { providerPollInterval: value }),
+        /providerPollInterval/
+      )
+    }
+  })
+
   describe('consume()', () => {
     it('returns a ConsumerSubscription immediately', () => {
       const client = new Client('http://localhost:8080', {
@@ -157,6 +173,117 @@ describe('Client', () => {
       sub.stop()
     })
 
+    it('does not emit a delayed initial value after a newer poll result', async () => {
+      let resolveInitial
+      let resolvePoll
+      const response = body => ({
+        ok: true,
+        status: 200,
+        json: async () => body,
+        text: async () => JSON.stringify(body),
+      })
+      const fetchFn = (rawURL, options) => {
+        const isPoll = new URL(rawURL).searchParams.has('wait')
+        return new Promise((resolve, reject) => {
+          if (isPoll && !resolvePoll) resolvePoll = body => resolve(response(body))
+          else if (!isPoll) resolveInitial = body => resolve(response(body))
+          options?.signal?.addEventListener('abort', () => {
+            const error = new Error('aborted')
+            error.name = 'AbortError'
+            reject(error)
+          }, { once: true })
+        })
+      }
+      const client = new Client('http://localhost:8080', { fetch: fetchFn })
+      const values = []
+      const sub = client.consume('temp')
+      sub.on('value', value => values.push(value.value))
+
+      await tick()
+      resolvePoll({ registers: { temp: { value: 2 } } })
+      await tick()
+      await tick()
+      resolveInitial({ registers: { temp: { value: 1 } } })
+      await tick()
+      await tick()
+
+      assert.deepEqual(values, [2])
+      sub.stop()
+    })
+
+    it('delivers one newer value to every same-name subscriber', async () => {
+      const initialResolvers = []
+      let resolvePoll
+      const response = body => ({
+        ok: true,
+        status: 200,
+        json: async () => body,
+        text: async () => JSON.stringify(body),
+      })
+      const fetchFn = (rawURL, options) => {
+        const isPoll = new URL(rawURL).searchParams.has('wait')
+        return new Promise((resolve, reject) => {
+          if (isPoll && !resolvePoll) resolvePoll = body => resolve(response(body))
+          else if (!isPoll) initialResolvers.push(body => resolve(response(body)))
+          options?.signal?.addEventListener('abort', () => {
+            const error = new Error('aborted')
+            error.name = 'AbortError'
+            reject(error)
+          }, { once: true })
+        })
+      }
+      const client = new Client('http://localhost:8080', { fetch: fetchFn })
+      const firstValues = []
+      const secondValues = []
+      const first = client.consume('temp')
+      const second = client.consume('temp')
+      first.on('value', value => firstValues.push(value.value))
+      second.on('value', value => secondValues.push(value.value))
+
+      await tick()
+      resolvePoll({ registers: { temp: { value: 2 } } })
+      await tick()
+      await tick()
+      for (const resolveInitial of initialResolvers) {
+        resolveInitial({ registers: { temp: { value: 1 } } })
+      }
+      await tick()
+      await tick()
+
+      assert.deepEqual(firstValues, [2])
+      assert.deepEqual(secondValues, [2])
+      first.stop()
+      second.stop()
+    })
+
+    it('re-emits the same value when a missing register is recreated', async () => {
+      const { fetchFn, respond } = createControllableFetch()
+      const client = new Client('http://localhost:8080', {
+        fetch: fetchFn,
+        consumerPollInterval: 60000,
+      })
+      const values = []
+      const sub = client.consume('temp')
+      sub.on('value', value => values.push(value))
+
+      await tick()
+      respond({ registers: { temp: { value: 21.5 } } })
+      await tick()
+      await tick()
+      respond({ registers: {} })
+      await tick()
+      await tick()
+      respond({ registers: { temp: { value: 21.5 } } })
+      await tick()
+      await tick()
+
+      assert.deepEqual(values, [
+        { value: 21.5, metadata: {} },
+        { value: 21.5, metadata: {} },
+      ])
+      sub.stop()
+    })
+
     it('batches multiple consume() subscriptions into one poll request', async () => {
       const urlsCalled = []
       const queue = []
@@ -242,6 +369,76 @@ describe('Client', () => {
       await tick()
 
       assert.equal(values.length, 1) // stopped before second value
+    })
+
+    it('keeps polling when a new subscription starts while the previous poll stops', async () => {
+      const { fetchFn, pendingURLs } = createControllableFetch()
+      const client = new Client('http://localhost:8080', {
+        fetch: fetchFn,
+        consumerPollInterval: 60000,
+      })
+
+      const first = client.consume('first')
+      await tick()
+      first.stop()
+
+      const second = client.consume('second')
+      await tick()
+      await tick()
+
+      assert.ok(
+        pendingURLs().some(url => new URL(url).searchParams.has('wait')),
+        'the replacement subscription should have an active long-poll request'
+      )
+      second.stop()
+    })
+
+    it('returns the change-request promise to the caller', async () => {
+      const fetchFn = (_url, opts) => {
+        if (opts?.method === 'PUT') {
+          return Promise.resolve({ ok: false, status: 503, text: async () => 'unavailable' })
+        }
+        return new Promise((_, reject) => {
+          opts?.signal?.addEventListener('abort', () => {
+            const err = new Error('aborted'); err.name = 'AbortError'; reject(err)
+          }, { once: true })
+        })
+      }
+      const client = new Client('http://localhost:8080', { fetch: fetchFn })
+      const sub = client.consume('temp')
+
+      await assert.rejects(sub.request(25), /503/)
+      sub.stop()
+    })
+
+    it('does not fabricate a missing register with a prototype-like name', async () => {
+      const fetchFn = (rawURL, options) => {
+        if (!new URL(rawURL).searchParams.has('wait')) {
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            json: async () => ({ registers: {} }),
+            text: async () => '',
+          })
+        }
+        return new Promise((_, reject) => {
+          options?.signal?.addEventListener('abort', () => {
+            const error = new Error('aborted')
+            error.name = 'AbortError'
+            reject(error)
+          }, { once: true })
+        })
+      }
+      const client = new Client('http://localhost:8080', { fetch: fetchFn })
+      const values = []
+      const sub = client.consume('toString')
+      sub.on('value', value => values.push(value))
+
+      await tick()
+      await tick()
+
+      assert.deepEqual(values, [])
+      sub.stop()
     })
   })
 
@@ -409,6 +606,139 @@ describe('Client', () => {
 
       pub.stop()
     })
+
+    it('rejects an invalid or zero TTL before sending a request', () => {
+      let calls = 0
+      const client = new Client('http://localhost:8080', {
+        fetch: async () => {
+          calls++
+          return { ok: true, status: 204, text: async () => '' }
+        },
+      })
+
+      for (const ttl of ['', '0s', 'junk5s', '5s-tail', '1sBAD2m']) {
+        assert.throws(() => client.provide('temp', 1, {}, ttl), /Invalid duration/)
+      }
+      assert.equal(calls, 0)
+    })
+
+    it('rejects a second active provider for the same register', () => {
+      let putCalls = 0
+      const fetchFn = (_url, opts) => {
+        if (opts?.method === 'PUT') {
+          putCalls++
+          return Promise.resolve({ ok: true, status: 204, text: async () => '' })
+        }
+        return new Promise((_, reject) => {
+          opts?.signal?.addEventListener('abort', () => {
+            const err = new Error('aborted'); err.name = 'AbortError'; reject(err)
+          }, { once: true })
+        })
+      }
+      const client = new Client('http://localhost:8080', { fetch: fetchFn })
+      const pub = client.provide('temp', 1, {}, '1h')
+
+      assert.throws(() => client.provide('temp', 2, {}, '1h'), /already has an active provider/)
+      assert.equal(putCalls, 1)
+      pub.stop()
+    })
+
+    it('does not let a stopped provider update its replacement', async () => {
+      const fetchFn = (_url, opts) => {
+        if (opts?.method === 'PUT') {
+          return Promise.resolve({ ok: true, status: 204, text: async () => '' })
+        }
+        return new Promise((_, reject) => {
+          opts?.signal?.addEventListener('abort', () => {
+            const err = new Error('aborted'); err.name = 'AbortError'; reject(err)
+          }, { once: true })
+        })
+      }
+      const client = new Client('http://localhost:8080', { fetch: fetchFn })
+      const first = client.provide('temp', 1, {}, '1h')
+      await tick()
+      first.stop()
+      await tick()
+      const replacement = client.provide('temp', 2, {}, '1h')
+
+      await assert.rejects(first.update(3), /stopped/)
+      replacement.stop()
+    })
+
+    it('keeps polling when a provider starts while the previous poll stops', async () => {
+      let activePolls = 0
+      const fetchFn = (_url, opts) => {
+        if (opts?.method === 'PUT') {
+          return Promise.resolve({ ok: true, status: 204, text: async () => '' })
+        }
+        return new Promise((_, reject) => {
+          const abort = () => {
+            activePolls--
+            const err = new Error('aborted'); err.name = 'AbortError'; reject(err)
+          }
+          if (opts?.signal?.aborted) abort()
+          else {
+            activePolls++
+            opts?.signal?.addEventListener('abort', abort, { once: true })
+          }
+        })
+      }
+      const client = new Client('http://localhost:8080', { fetch: fetchFn })
+
+      const first = client.provide('first', 1, {}, '1h')
+      await tick()
+      first.stop()
+      const second = client.provide('second', 2, {}, '1h')
+      await tick()
+      await tick()
+
+      assert.ok(activePolls > 0, 'the replacement provider should have an active poll')
+      second.stop()
+    })
+
+    it('serializes TTL refreshes and aborts an in-flight write on stop', async () => {
+      let activeWrites = 0
+      let maxActiveWrites = 0
+      let putCalls = 0
+      const fetchFn = (_url, opts) => {
+        if (opts?.method === 'PUT') {
+          putCalls++
+          activeWrites++
+          maxActiveWrites = Math.max(maxActiveWrites, activeWrites)
+          return new Promise((_, reject) => {
+            opts.signal.addEventListener('abort', () => {
+              activeWrites--
+              const error = new Error('aborted')
+              error.name = 'AbortError'
+              reject(error)
+            }, { once: true })
+          })
+        }
+        return new Promise((_, reject) => {
+          opts?.signal?.addEventListener('abort', () => {
+            const error = new Error('aborted')
+            error.name = 'AbortError'
+            reject(error)
+          }, { once: true })
+        })
+      }
+      const client = new Client('http://localhost:8080', { fetch: fetchFn })
+      const pub = client.provide('temp', 1, {}, '10ms')
+
+      await new Promise(resolve => setTimeout(resolve, 35))
+      assert.equal(putCalls, 1)
+      assert.equal(maxActiveWrites, 1)
+
+      pub.stop()
+      await tick()
+      await tick()
+      assert.equal(activeWrites, 0)
+
+      const replacement = client.provide('temp', 2, {}, '1h')
+      await tick()
+      assert.equal(maxActiveWrites, 1)
+      replacement.stop()
+    })
   })
 
   describe('consumeAll()', () => {
@@ -489,6 +819,90 @@ describe('Client', () => {
       assert.equal(updates[0].value, 21.5)
 
       sub.stop()
+    })
+
+    it('does not emit a delayed initial snapshot after a newer poll result', async () => {
+      let resolveInitial
+      let resolvePoll
+      const response = body => ({
+        ok: true,
+        status: 200,
+        json: async () => body,
+        text: async () => JSON.stringify(body),
+      })
+      const fetchFn = (rawURL, options) => {
+        const isPoll = new URL(rawURL).searchParams.has('wait')
+        return new Promise((resolve, reject) => {
+          if (isPoll && !resolvePoll) resolvePoll = body => resolve(response(body))
+          else if (!isPoll) resolveInitial = body => resolve(response(body))
+          options?.signal?.addEventListener('abort', () => {
+            const error = new Error('aborted')
+            error.name = 'AbortError'
+            reject(error)
+          }, { once: true })
+        })
+      }
+      const client = new Client('http://localhost:8080', { fetch: fetchFn })
+      const updates = []
+      const sub = client.consumeAll()
+      sub.on('update', update => updates.push(update.value))
+
+      await tick()
+      resolvePoll({ registers: { temp: { value: 2 } } })
+      await tick()
+      await tick()
+      resolveInitial({ registers: { temp: { value: 1 } } })
+      await tick()
+      await tick()
+
+      assert.deepEqual(updates, [2])
+      sub.stop()
+    })
+
+    it('emits a removed update and forgets an expired register', async () => {
+      const { fetchFn, respond } = createControllableFetch()
+      const client = new Client('http://localhost:8080', {
+        fetch: fetchFn,
+        consumerPollInterval: 60000,
+      })
+      const updates = []
+      const sub = client.consumeAll()
+      sub.on('update', update => updates.push(update))
+
+      await tick()
+      respond({ registers: { temp: { value: 21.5 } } })
+      await tick()
+      await tick()
+      respond({ registers: {} })
+      await tick()
+      await tick()
+
+      assert.deepEqual(updates, [
+        { name: 'temp', value: 21.5, metadata: {} },
+        { name: 'temp', removed: true },
+      ])
+      sub.stop()
+    })
+
+    it('keeps polling when a new all-register subscription starts while the previous poll stops', async () => {
+      const { fetchFn, pendingURLs } = createControllableFetch()
+      const client = new Client('http://localhost:8080', {
+        fetch: fetchFn,
+        consumerPollInterval: 60000,
+      })
+
+      const first = client.consumeAll()
+      await tick()
+      first.stop()
+      const second = client.consumeAll()
+      await tick()
+      await tick()
+
+      assert.ok(
+        pendingURLs().some(url => new URL(url).searchParams.has('wait')),
+        'the replacement subscription should have an active long-poll request'
+      )
+      second.stop()
     })
   })
 })

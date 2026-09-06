@@ -8,6 +8,9 @@
     ".": "./src/index.js",
     "./wire": "./src/wire/index.js"
   },
+  "files": [
+    "src"
+  ],
   "scripts": {
     "test": "node --test"
   },

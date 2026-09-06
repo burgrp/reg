@@ -8,9 +8,25 @@ import (
 
 // ProviderPutRegister represents a register update from a provider
 type ProviderPutRegister struct {
-	Value    any            `json:"value,omitempty"`
-	Metadata map[string]any `json:"metadata,omitempty"`
-	TTL      Duration       `json:"ttl,omitempty"`
+	Value        any            `json:"value"`
+	Metadata     map[string]any `json:"metadata,omitempty"`
+	TTL          Duration       `json:"ttl,omitempty"`
+	valuePresent bool
+}
+
+func (r *ProviderPutRegister) UnmarshalJSON(data []byte) error {
+	type registerAlias ProviderPutRegister
+	var value registerAlias
+	if err := json.Unmarshal(data, &value); err != nil {
+		return err
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	*r = ProviderPutRegister(value)
+	_, r.valuePresent = fields["value"]
+	return nil
 }
 
 // ProviderPutRequest is the request format for provider PUT requests
@@ -20,7 +36,7 @@ type ProviderPutRequest struct {
 
 // ProviderGetRegister represents a change request in provider GET responses
 type ProviderGetRegister struct {
-	Value any `json:"value,omitempty"`
+	Value any `json:"value"`
 }
 
 // ProviderResponse is the response format for provider GET requests
@@ -62,6 +78,16 @@ func (s *Server) handleProvider(w http.ResponseWriter, r *http.Request) {
 			s.logger.Error("failed to decode request", "error", err)
 			http.Error(w, "invalid request", http.StatusBadRequest)
 			return
+		}
+		if req.Registers == nil {
+			http.Error(w, "registers is required", http.StatusBadRequest)
+			return
+		}
+		for _, reg := range req.Registers {
+			if !reg.valuePresent {
+				http.Error(w, "register value is required", http.StatusBadRequest)
+				return
+			}
 		}
 
 		for name, reg := range req.Registers {

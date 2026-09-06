@@ -66,12 +66,37 @@ describe('ConsumerClient', () => {
       assert.equal(url.searchParams.get('wait'), '5s')
     })
 
-    it('returns empty object when registers is missing', async () => {
+    it('rejects a response when registers is missing', async () => {
       const { fetchFn } = mockFetch(200, {})
       const client = new ConsumerClient('http://localhost:8080', fetchFn)
 
+      await assert.rejects(() => client.getRegisters(), /invalid response/)
+    })
+
+    it('rejects malformed registers and metadata', async () => {
+      for (const body of [
+        { registers: [] },
+        { registers: { temp: {} } },
+        { registers: { temp: { value: 20, metadata: null } } },
+        { registers: { temp: { value: 20, metadata: [] } } },
+      ]) {
+        const { fetchFn } = mockFetch(200, body)
+        const client = new ConsumerClient('http://localhost:8080', fetchFn)
+        await assert.rejects(() => client.getRegisters(), /invalid/)
+      }
+    })
+
+    it('preserves prototype-like register names', async () => {
+      const body = JSON.parse('{"registers":{"toString":{"value":1},"__proto__":{"value":2}}}')
+      const { fetchFn } = mockFetch(200, body)
+      const client = new ConsumerClient('http://localhost:8080', fetchFn)
+
       const result = await client.getRegisters()
-      assert.deepEqual(result, {})
+
+      assert.equal(Object.hasOwn(result, 'toString'), true)
+      assert.equal(Object.hasOwn(result, '__proto__'), true)
+      assert.equal(result.toString.value, 1)
+      assert.equal(result.__proto__.value, 2)
     })
 
     it('strips trailing slash from base URL', async () => {

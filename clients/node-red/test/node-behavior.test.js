@@ -67,6 +67,45 @@ test('reg-consume emits register updates and stops on close', () => {
   assert.equal(sub.stopCalled, true)
 })
 
+test('reg-consume-all forwards updates, removals, and change requests', async () => {
+  let requested = null
+  const sub = createEmitterSubscription({
+    async request(name, value) {
+      requested = { name, value }
+    },
+  })
+  const serverNode = {
+    getClient() {
+      return { consumeAll: () => sub }
+    },
+  }
+
+  const RED = createFakeRED({ cfg: serverNode })
+  require('../nodes/reg-consume-all.js')(RED)
+
+  const Ctor = RED._registry['reg-consume-all']
+  const node = new Ctor({ server: 'cfg' })
+
+  sub.emit('update', { name: 'temperature', value: 21.5, metadata: { unit: 'celsius' } })
+  sub.emit('update', { name: 'temperature', removed: true })
+
+  assert.deepEqual(node.sent, [
+    { topic: 'temperature', payload: 21.5, metadata: { unit: 'celsius' } },
+    { topic: 'temperature', removed: true },
+  ])
+
+  await new Promise((resolve, reject) => {
+    node.emit('input', { topic: ' temperature ', payload: 24 }, () => {}, (err) => {
+      if (err) reject(err)
+      else resolve()
+    })
+  })
+  assert.deepEqual(requested, { name: 'temperature', value: 24 })
+
+  node.emit('close', () => {})
+  assert.equal(sub.stopCalled, true)
+})
+
 test('reg-provide emits change requests and updates values from input', async () => {
   const sub = createEmitterSubscription({
     async update(value) {
@@ -117,4 +156,31 @@ test('reg-provide emits change requests and updates values from input', async ()
   })
 
   assert.equal(sub.lastUpdated, 26)
+})
+
+test('reg-connection uses the client polling defaults', () => {
+  const RED = createFakeRED()
+  require('../nodes/reg-connection.js')(RED)
+
+  const Ctor = RED._registry['reg-connection']
+  const node = new Ctor({ registryUrl: 'http://localhost:8080' })
+
+  assert.equal(node.consumerPollInterval, 5000)
+  assert.equal(node.providerPollInterval, 30000)
+  assert.ok(node.getClient())
+})
+
+test('reg-connection falls back for sub-millisecond polling intervals', () => {
+  const RED = createFakeRED()
+  require('../nodes/reg-connection.js')(RED)
+
+  const Ctor = RED._registry['reg-connection']
+  const node = new Ctor({
+    registryUrl: 'http://localhost:8080',
+    consumerPollInterval: 0.5,
+    providerPollInterval: 0.5,
+  })
+
+  assert.equal(node.consumerPollInterval, 5000)
+  assert.equal(node.providerPollInterval, 30000)
 })

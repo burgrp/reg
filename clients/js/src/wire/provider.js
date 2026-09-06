@@ -5,6 +5,21 @@
  * Does not provide any reactive patterns or TTL refresh - use the
  * high-level Client class for that.
  */
+function parseChangeRequests(body) {
+  if (body === null || typeof body !== 'object' || Array.isArray(body) ||
+      !Object.hasOwn(body, 'registers') || body.registers === null ||
+      typeof body.registers !== 'object' || Array.isArray(body.registers)) {
+    throw new Error('GET /provider returned an invalid response')
+  }
+  return Object.fromEntries(Object.entries(body.registers).map(([name, register]) => {
+    if (register === null || typeof register !== 'object' || Array.isArray(register) ||
+        !Object.hasOwn(register, 'value')) {
+      throw new Error(`GET /provider returned an invalid register '${name}'`)
+    }
+    return [name, register.value]
+  }))
+}
+
 export class ProviderClient {
   #baseURL
   #fetch
@@ -27,7 +42,7 @@ export class ProviderClient {
    *   Map of register name to update. TTL is a Go duration string (e.g. "5s", "10m").
    * @returns {Promise<void>}
    */
-  async setRegisters(registers) {
+  async setRegisters(registers, signal = undefined) {
     const url = `${this.#baseURL}/provider`
     const body = {
       registers: Object.fromEntries(
@@ -46,6 +61,7 @@ export class ProviderClient {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
+      signal,
     })
 
     if (res.status !== 204) {
@@ -80,10 +96,6 @@ export class ProviderClient {
     }
 
     const body = await res.json()
-    const result = {}
-    for (const [name, reg] of Object.entries(body.registers ?? {})) {
-      result[name] = reg.value
-    }
-    return result
+    return parseChangeRequests(body)
   }
 }

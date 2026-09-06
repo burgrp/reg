@@ -92,6 +92,12 @@ Implements the Client interface with optimizations:
 - **Automatic TTL refresh** - Providers auto-refresh at 50% TTL interval
 - **Context-based lifecycle** - Clean cancellation and resource cleanup
 
+#### Other Client Implementations
+
+- `clients/js/` - Event-driven JavaScript client with batched long-polling
+- `clients/node-red/` - Node-RED nodes and embedded JavaScript runtime
+- `clients/python/` - Typed async Python client with async iterators and context managers
+
 ## Data Flow
 
 ### Provider Publishing Flow

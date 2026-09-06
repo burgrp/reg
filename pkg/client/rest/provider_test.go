@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -50,6 +51,88 @@ func TestClient_Provide_InitialValue(t *testing.T) {
 	case <-time.After(500 * time.Millisecond):
 		t.Error("Server did not receive initial value")
 	}
+}
+
+func TestClient_Provide_RejectsDuplicateNameAndInvalidTTL(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPut {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		json.NewEncoder(w).Encode(rest.ProviderGetResponse{Registers: map[string]rest.ProviderGetRegister{}})
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if _, _, err := client.Provide(ctx, "temp", 1, nil, time.Second); err != nil {
+		t.Fatalf("Unexpected first provider error: %v", err)
+	}
+	if _, _, err := client.Provide(ctx, "temp", 2, nil, time.Second); err == nil {
+		t.Fatal("Expected duplicate provider to be rejected")
+	}
+	if _, _, err := client.Provide(ctx, "other", 1, nil, 0); err == nil {
+		t.Fatal("Expected non-positive TTL to be rejected")
+	}
+	if _, _, err := client.Provide(ctx, "tiny", 1, nil, time.Nanosecond); err == nil {
+		t.Fatal("Expected TTL with zero refresh interval to be rejected")
+	}
+}
+
+func TestClient_Provide_SerializesUpdatesAndRefreshes(t *testing.T) {
+	var active atomic.Int32
+	var maximum atomic.Int32
+	var putCount atomic.Int32
+	blocked := make(chan struct{})
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPut {
+			json.NewEncoder(w).Encode(rest.ProviderGetResponse{Registers: map[string]rest.ProviderGetRegister{}})
+			return
+		}
+		count := putCount.Add(1)
+		current := active.Add(1)
+		for {
+			previous := maximum.Load()
+			if current <= previous || maximum.CompareAndSwap(previous, current) {
+				break
+			}
+		}
+		defer active.Add(-1)
+		if count > 1 {
+			select {
+			case <-blocked:
+			case <-r.Context().Done():
+				return
+			}
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL)
+	ctx, cancel := context.WithCancel(context.Background())
+	updates, _, err := client.Provide(ctx, "temp", 1, nil, 20*time.Millisecond)
+	if err != nil {
+		t.Fatalf("Unexpected provider error: %v", err)
+	}
+	updates <- 2
+	deadline := time.After(500 * time.Millisecond)
+	for putCount.Load() < 2 {
+		select {
+		case <-deadline:
+			t.Fatal("Timed out waiting for update PUT")
+		default:
+			time.Sleep(time.Millisecond)
+		}
+	}
+	time.Sleep(40 * time.Millisecond)
+	if got := maximum.Load(); got != 1 {
+		t.Fatalf("Expected one active provider write, got %d", got)
+	}
+	cancel()
+	close(blocked)
 }
 
 func TestClient_Provide_Updates(t *testing.T) {

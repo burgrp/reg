@@ -55,6 +55,47 @@ func TestSetRegister_Update(t *testing.T) {
 	}
 }
 
+func TestSetRegister_MetadataOnlyUpdateNotifies(t *testing.T) {
+	reg := newTestRegistry()
+	reg.SetRegister("temp", 25.0, Metadata{"unit": "C"}, 10*time.Second)
+
+	done := make(chan map[string]Register, 1)
+	go func() {
+		done <- reg.WaitForChange([]string{"temp"}, 500*time.Millisecond)
+	}()
+	time.Sleep(30 * time.Millisecond)
+	reg.SetRegister("temp", 25.0, Metadata{"unit": "F"}, 10*time.Second)
+
+	select {
+	case registers := <-done:
+		if got := registers["temp"].Metadata["unit"]; got != "F" {
+			t.Fatalf("Expected updated metadata unit=F, got %v", got)
+		}
+	case <-time.After(150 * time.Millisecond):
+		t.Fatal("metadata-only update did not notify waiting consumers")
+	}
+}
+
+func TestSetRegister_NewNullValueNotifies(t *testing.T) {
+	reg := newTestRegistry()
+	done := make(chan map[string]Register, 1)
+	go func() {
+		done <- reg.WaitForChange([]string{"nullable"}, 500*time.Millisecond)
+	}()
+	time.Sleep(30 * time.Millisecond)
+	reg.SetRegister("nullable", nil, nil, 10*time.Second)
+
+	select {
+	case registers := <-done:
+		register, exists := registers["nullable"]
+		if !exists || register.Value != nil {
+			t.Fatalf("Expected newly created null register, got %v", registers)
+		}
+	case <-time.After(150 * time.Millisecond):
+		t.Fatal("new null register did not notify waiting consumers")
+	}
+}
+
 func TestWaitForChange_AllRegisters(t *testing.T) {
 	reg := newTestRegistry()
 
@@ -90,17 +131,8 @@ func TestWaitForChange_NonExistent(t *testing.T) {
 
 	result := reg.WaitForChange([]string{"nonexistent"}, 0)
 
-	if len(result) != 1 {
-		t.Errorf("Expected 1 result, got %d", len(result))
-	}
-
-	r, exists := result["nonexistent"]
-	if !exists {
-		t.Fatal("Expected 'nonexistent' register to be in result")
-	}
-
-	if r.Value != nil {
-		t.Errorf("Expected nil value for nonexistent register, got %v", r.Value)
+	if len(result) != 0 {
+		t.Errorf("Expected no results, got %d", len(result))
 	}
 }
 
@@ -233,6 +265,30 @@ func TestWaitForChangeRequests_Consumes(t *testing.T) {
 	}
 }
 
+func TestWaitForChangeRequests_AlreadyPendingReturnsImmediately(t *testing.T) {
+	reg := newTestRegistry()
+	reg.RequestChange("temp", 30.0)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	done := make(chan map[string]any, 1)
+	go func() {
+		done <- reg.WaitForChangeRequestsWithContext(ctx, []string{"temp"}, time.Hour)
+	}()
+
+	select {
+	case requests := <-done:
+		if requests["temp"] != 30.0 {
+			t.Fatalf("expected pending temp=30.0, got %v", requests)
+		}
+	case <-time.After(100 * time.Millisecond):
+		cancel()
+		<-done
+		t.Fatal("an already pending request should return without long-polling")
+	}
+}
+
 func TestWaitForChangeRequests_LongPolling(t *testing.T) {
 	reg := newTestRegistry()
 
@@ -279,6 +335,23 @@ func TestWaitForChangeRequestsWithContext_Canceled(t *testing.T) {
 
 	if duration >= time.Second {
 		t.Fatalf("expected cancellation to interrupt wait early, got %v", duration)
+	}
+}
+
+func TestWaitForChangeRequestsWithContext_CanceledPreservesPendingRequest(t *testing.T) {
+	reg := newTestRegistry()
+	reg.RequestChange("temp", 30.0)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	requests := reg.WaitForChangeRequestsWithContext(ctx, []string{"temp"}, time.Second)
+	if len(requests) != 0 {
+		t.Fatalf("expected canceled poll to return no requests, got %v", requests)
+	}
+
+	preserved := reg.WaitForChangeRequests([]string{"temp"}, 0)
+	if preserved["temp"] != 30.0 {
+		t.Fatalf("expected pending request to remain queued, got %v", preserved)
 	}
 }
 

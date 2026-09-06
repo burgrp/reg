@@ -8,7 +8,7 @@ module.exports = function (RED) {
     this.name = config.name
     this.registryUrl = (config.registryUrl || process.env.REGISTRY || '').trim()
     this.consumerPollInterval = asInteger(config.consumerPollInterval, 5000)
-    this.providerPollInterval = asInteger(config.providerPollInterval, 5000)
+    this.providerPollInterval = asInteger(config.providerPollInterval, 30000)
 
     if (!this.registryUrl) {
       this.error('registry URL is required in reg-connection or REGISTRY env var')

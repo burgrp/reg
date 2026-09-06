@@ -13,6 +13,7 @@ type Client interface {
 	// The values channel immediately receives the current value (with no-wait GET internally),
 	// then continuously polls for updates using long-polling.
 	// The requests channel allows sending change requests to providers.
+	// Implementations may reject a second active subscription for the same name.
 	// Both channels are closed when the context is cancelled.
 	Consume(ctx context.Context, name string) (<-chan ValueAndMetadata, chan<- any, error)
 
@@ -29,6 +30,7 @@ type Client interface {
 	// The updates channel allows sending new values (metadata and TTL remain from initial call).
 	// The changeRequests channel receives consumer change requests via long-polling.
 	// TTL is automatically refreshed in the background before expiration.
+	// Implementations may reject a second active provider for the same name.
 	// Both channels are closed when the context is cancelled.
 	Provide(ctx context.Context, name string, value any, metadata map[string]any, ttl time.Duration) (chan<- any, <-chan any, error)
 }

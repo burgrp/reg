@@ -143,6 +143,31 @@ describe('ProviderClient', () => {
       assert.deepEqual(result, { temp: 99, flag: false })
     })
 
+    it('rejects malformed responses', async () => {
+      for (const body of [
+        {},
+        { registers: [] },
+        { registers: { temp: {} } },
+      ]) {
+        const { fetchFn } = mockFetch(200, body)
+        const client = new ProviderClient('http://localhost:8080', fetchFn)
+        await assert.rejects(() => client.getChangeRequests(['temp']), /invalid/)
+      }
+    })
+
+    it('preserves prototype-like register names', async () => {
+      const body = JSON.parse('{"registers":{"toString":{"value":1},"__proto__":{"value":2}}}')
+      const { fetchFn } = mockFetch(200, body)
+      const client = new ProviderClient('http://localhost:8080', fetchFn)
+
+      const result = await client.getChangeRequests(['toString', '__proto__'])
+
+      assert.equal(Object.hasOwn(result, 'toString'), true)
+      assert.equal(Object.hasOwn(result, '__proto__'), true)
+      assert.equal(result.toString, 1)
+      assert.equal(result.__proto__, 2)
+    })
+
     it('throws on non-ok HTTP status', async () => {
       const { fetchFn } = mockFetch(503, 'unavailable')
       const client = new ProviderClient('http://localhost:8080', fetchFn)

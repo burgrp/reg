@@ -109,6 +109,34 @@ func TestConsumerGet_MultipleNames(t *testing.T) {
 	}
 }
 
+func TestConsumerGet_DistinguishesNullFromMissing(t *testing.T) {
+	server := newTestServer()
+	server.registry.SetRegister("nullable", nil, registry.Metadata{}, 10*time.Second)
+
+	req := httptest.NewRequest(http.MethodGet, "/consumer?name=nullable&name=missing", nil)
+	w := httptest.NewRecorder()
+	server.handleConsumer(w, req)
+
+	var response struct {
+		Registers map[string]map[string]json.RawMessage `json:"registers"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&response); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	nullable, exists := response.Registers["nullable"]
+	if !exists {
+		t.Fatal("expected existing nullable register in response")
+	}
+	value, exists := nullable["value"]
+	if !exists || string(value) != "null" {
+		t.Fatalf("expected explicit null value, got %s", value)
+	}
+	if _, exists := response.Registers["missing"]; exists {
+		t.Fatal("missing register must be omitted from response")
+	}
+}
+
 func TestConsumerGet_InvalidWaitParameter(t *testing.T) {
 	server := newTestServer()
 
@@ -158,6 +186,44 @@ func TestConsumerPut_InvalidJSON(t *testing.T) {
 
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("Expected status 400, got %d", w.Code)
+	}
+}
+
+func TestConsumerPut_RequiresValueButAllowsNull(t *testing.T) {
+	server := newTestServer()
+	for _, body := range []string{`{}`, `{"registers":null}`} {
+		request := httptest.NewRequest(http.MethodPut, "/consumer", bytes.NewBufferString(body))
+		response := httptest.NewRecorder()
+		server.handleConsumer(response, request)
+		if response.Code != http.StatusBadRequest {
+			t.Fatalf("Expected missing registers status 400, got %d", response.Code)
+		}
+	}
+
+	missing := httptest.NewRequest(http.MethodPut, "/consumer", bytes.NewBufferString(
+		`{"registers":{"temp":{}}}`,
+	))
+	missingResponse := httptest.NewRecorder()
+	server.handleConsumer(missingResponse, missing)
+	if missingResponse.Code != http.StatusBadRequest {
+		t.Fatalf("Expected missing value status 400, got %d", missingResponse.Code)
+	}
+	if requests := server.registry.WaitForChangeRequests([]string{"temp"}, 0); len(requests) != 0 {
+		t.Fatalf("Missing value request must not be queued, got %v", requests)
+	}
+
+	nullValue := httptest.NewRequest(http.MethodPut, "/consumer", bytes.NewBufferString(
+		`{"registers":{"temp":{"value":null}}}`,
+	))
+	nullResponse := httptest.NewRecorder()
+	server.handleConsumer(nullResponse, nullValue)
+	if nullResponse.Code != http.StatusAccepted {
+		t.Fatalf("Expected explicit null status 202, got %d", nullResponse.Code)
+	}
+	requests := server.registry.WaitForChangeRequests([]string{"temp"}, 0)
+	value, exists := requests["temp"]
+	if !exists || value != nil {
+		t.Fatalf("Expected queued explicit null, got %v", requests)
 	}
 }
 
@@ -217,6 +283,44 @@ func TestProviderPut_InvalidJSON(t *testing.T) {
 	}
 }
 
+func TestProviderPut_RequiresValueButAllowsNull(t *testing.T) {
+	server := newTestServer()
+	for _, body := range []string{`{}`, `{"registers":null}`} {
+		request := httptest.NewRequest(http.MethodPut, "/provider", bytes.NewBufferString(body))
+		response := httptest.NewRecorder()
+		server.handleProvider(response, request)
+		if response.Code != http.StatusBadRequest {
+			t.Fatalf("Expected missing registers status 400, got %d", response.Code)
+		}
+	}
+
+	missing := httptest.NewRequest(http.MethodPut, "/provider", bytes.NewBufferString(
+		`{"registers":{"temp":{}}}`,
+	))
+	missingResponse := httptest.NewRecorder()
+	server.handleProvider(missingResponse, missing)
+	if missingResponse.Code != http.StatusBadRequest {
+		t.Fatalf("Expected missing value status 400, got %d", missingResponse.Code)
+	}
+	if registers := server.registry.WaitForChange([]string{"temp"}, 0); len(registers) != 0 {
+		t.Fatalf("Missing value request must not create a register, got %v", registers)
+	}
+
+	nullValue := httptest.NewRequest(http.MethodPut, "/provider", bytes.NewBufferString(
+		`{"registers":{"temp":{"value":null,"ttl":"10s"}}}`,
+	))
+	nullResponse := httptest.NewRecorder()
+	server.handleProvider(nullResponse, nullValue)
+	if nullResponse.Code != http.StatusNoContent {
+		t.Fatalf("Expected explicit null status 204, got %d", nullResponse.Code)
+	}
+	registers := server.registry.WaitForChange([]string{"temp"}, 0)
+	register, exists := registers["temp"]
+	if !exists || register.Value != nil {
+		t.Fatalf("Expected stored explicit null, got %v", registers)
+	}
+}
+
 func TestProviderGet_ChangeRequests(t *testing.T) {
 	server := newTestServer()
 
@@ -241,6 +345,26 @@ func TestProviderGet_ChangeRequests(t *testing.T) {
 
 	if response.Registers["temp"].Value != 30.0 {
 		t.Errorf("Expected value 30.0, got %v", response.Registers["temp"].Value)
+	}
+}
+
+func TestProviderGet_PreservesNullChangeRequest(t *testing.T) {
+	server := newTestServer()
+	server.registry.RequestChange("temp", nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/provider?name=temp", nil)
+	w := httptest.NewRecorder()
+	server.handleProvider(w, req)
+
+	var response struct {
+		Registers map[string]map[string]json.RawMessage `json:"registers"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&response); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	value, exists := response.Registers["temp"]["value"]
+	if !exists || string(value) != "null" {
+		t.Fatalf("expected explicit null change request, got %s", value)
 	}
 }
 

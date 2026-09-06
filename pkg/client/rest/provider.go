@@ -2,6 +2,7 @@ package rest
 
 import (
 	"context"
+	"fmt"
 	"time"
 )
 
@@ -9,6 +10,12 @@ import (
 func (c *Client) Provide(ctx context.Context, name string, value any, metadata map[string]any, ttl time.Duration) (chan<- any, <-chan any, error) {
 	c.providerMu.Lock()
 	defer c.providerMu.Unlock()
+	if ttl <= 0 || ttl/2 <= 0 {
+		return nil, nil, fmt.Errorf("ttl must be positive")
+	}
+	if _, exists := c.providerSubs[name]; exists {
+		return nil, nil, fmt.Errorf("register %q already has an active provider", name)
+	}
 
 	// Create subscription with its own context
 	subCtx, subCancel := context.WithCancel(context.Background())
@@ -33,17 +40,17 @@ func (c *Client) Provide(ctx context.Context, name string, value any, metadata m
 		go c.providerBatchPoller(c.providerBatchCtx)
 	}
 
-	// Handle updates
-	go c.handleProviderUpdates(ctx, name, metadata, ttl, sub.updates)
-
-	// Handle TTL refresh
-	go c.handleTTLRefresh(ctx, name, metadata, ttl)
+	// Serialize updates and TTL refreshes so an older write can never complete last.
+	sub.wg.Add(1)
+	go c.handleProviderWrites(ctx, sub)
 
 	// Handle cleanup on context cancel
 	go func() {
 		<-ctx.Done()
 		c.providerMu.Lock()
-		delete(c.providerSubs, name)
+		if c.providerSubs[name] == sub {
+			delete(c.providerSubs, name)
+		}
 		c.providerMu.Unlock()
 
 		// Cancel subscription context to signal senders to stop
@@ -91,7 +98,7 @@ func (c *Client) providerBatchPoller(ctx context.Context) {
 
 		// Long poll for change requests
 		pollInterval := c.ProviderPollInterval
-		if pollInterval == 0 {
+		if pollInterval <= 0 {
 			pollInterval = 30 * time.Second
 		}
 		requests, err := c.providerClient.GetChangeRequests(ctx, names, pollInterval)
@@ -121,55 +128,30 @@ func (c *Client) providerBatchPoller(ctx context.Context) {
 	}
 }
 
-// handleProviderUpdates sends provider value updates to the server
-func (c *Client) handleProviderUpdates(ctx context.Context, name string, metadata map[string]any, ttl time.Duration, updates <-chan any) {
+// handleProviderWrites serializes explicit updates and automatic TTL refreshes.
+func (c *Client) handleProviderWrites(ctx context.Context, sub *providerSubscription) {
+	defer sub.wg.Done()
+	ticker := time.NewTicker(sub.ttl / 2)
+	defer ticker.Stop()
+
+	currentValue := sub.currentValue
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case value, ok := <-updates:
+		case value, ok := <-sub.updates:
 			if !ok {
 				return
 			}
-			// Update current value in subscription
+			currentValue = value
 			c.providerMu.Lock()
-			if sub, exists := c.providerSubs[name]; exists {
+			if c.providerSubs[sub.name] == sub {
 				sub.currentValue = value
 			}
 			c.providerMu.Unlock()
-
-			c.providerClient.SetRegister(ctx, name, value, metadata, ttl)
-		}
-	}
-}
-
-// handleTTLRefresh automatically refreshes the register TTL before expiration
-func (c *Client) handleTTLRefresh(ctx context.Context, name string, metadata map[string]any, ttl time.Duration) {
-	if ttl <= 0 {
-		return // No TTL refresh needed
-	}
-
-	// Refresh at 50% of TTL
-	refreshInterval := ttl / 2
-	ticker := time.NewTicker(refreshInterval)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
+			c.providerClient.SetRegister(ctx, sub.name, currentValue, sub.metadata, sub.ttl)
 		case <-ticker.C:
-			c.providerMu.Lock()
-			sub, exists := c.providerSubs[name]
-			if !exists {
-				c.providerMu.Unlock()
-				return
-			}
-			currentValue := sub.currentValue
-			c.providerMu.Unlock()
-
-			// Refresh with current value
-			c.providerClient.SetRegister(ctx, name, currentValue, metadata, ttl)
+			c.providerClient.SetRegister(ctx, sub.name, currentValue, sub.metadata, sub.ttl)
 		}
 	}
 }

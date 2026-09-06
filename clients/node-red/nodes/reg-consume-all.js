@@ -15,12 +15,12 @@ module.exports = function (RED) {
     try {
       sub = server.getClient().consumeAll()
 
-      sub.on('update', ({ name, value, metadata }) => {
-        node.send({
-          topic: name,
-          payload: value,
-          metadata,
-        })
+      sub.on('update', ({ name, value, metadata, removed = false }) => {
+        if (removed) {
+          node.send({ topic: name, removed: true })
+          return
+        }
+        node.send({ topic: name, payload: value, metadata })
       })
 
       sub.on('error', (err) => {

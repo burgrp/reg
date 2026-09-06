@@ -1,11 +1,47 @@
-on: push
+on:
+  push:
+  pull_request:
 name: Build & Release
 jobs:
-  build:
-    permissions: write-all
+  test:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@master
+    - uses: actions/checkout@v4
+    - uses: actions/setup-go@v5
+      with:
+        go-version-file: go.mod
+    - uses: actions/setup-node@v4
+      with:
+        node-version: 22
+    - uses: actions/setup-python@v5
+      with:
+        python-version: '3.10'
+    - name: Test Go
+      run: go test ./...
+    - name: Test JavaScript client
+      run: npm --prefix clients/js test
+    - name: Test Node-RED client
+      run: npm --prefix clients/node-red test
+    - name: Install Python client
+      run: python -m pip install -e './clients/python[dev]'
+    - name: Test Python client
+      run: |
+        python -m unittest discover -s clients/python/test -v
+        ruff check clients/python
+        ruff format --check clients/python
+        mypy clients/python/src
+
+  build:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: test
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/setup-go@v5
+      with:
+        go-version-file: go.mod
     - name: build
       run: |
         ./build.sh

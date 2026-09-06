@@ -5,7 +5,7 @@
       name: { value: '' },
       registryUrl: { value: 'http://localhost:8080', required: false },
       consumerPollInterval: { value: 5000, required: true, validate: RED.validators.number() },
-      providerPollInterval: { value: 5000, required: true, validate: RED.validators.number() }
+      providerPollInterval: { value: 30000, required: true, validate: RED.validators.number() }
     },
     label: function () {
       return this.name || 'Registry'
@@ -30,7 +30,7 @@
   </div>
   <div class="form-row">
     <label for="node-config-input-providerPollInterval"><i class="fa fa-clock-o"></i> Provider Poll (ms)</label>
-    <input type="text" id="node-config-input-providerPollInterval" placeholder="5000">
+    <input type="text" id="node-config-input-providerPollInterval" placeholder="30000">
   </div>
 </script>
 

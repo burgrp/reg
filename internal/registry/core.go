@@ -146,10 +146,6 @@ func (r *Registry) WaitForChangeWithContext(ctx context.Context, names []string,
 		for _, name := range names {
 			if reg, exists := r.registers[name]; exists {
 				registers[name] = *reg
-			} else {
-				registers[name] = Register{
-					Metadata: make(Metadata),
-				}
 			}
 		}
 		return registers
@@ -163,9 +159,7 @@ func (r *Registry) SetRegister(name string, value any, metadata Metadata, ttl ti
 
 	reg, exists := r.registers[name]
 	if !exists {
-		reg = &Register{
-			Metadata: metadata,
-		}
+		reg = &Register{}
 		r.registers[name] = reg
 	}
 
@@ -174,8 +168,10 @@ func (r *Registry) SetRegister(name string, value any, metadata Metadata, ttl ti
 	}
 	reg.ttl = time.Now().Add(ttl)
 
-	if !reflect.DeepEqual(reg.Value, value) {
-		reg.Value = value
+	changed := !exists || !reflect.DeepEqual(reg.Value, value) || !reflect.DeepEqual(reg.Metadata, metadata)
+	reg.Value = value
+	reg.Metadata = metadata
+	if changed {
 		r.logger.Debug("register changed", "name", name, "value", value, "ttl", ttl)
 		r.valueChangeListeners.Notify(name)
 	}
@@ -199,12 +195,56 @@ func (r *Registry) WaitForChangeRequests(names []string, duration time.Duration)
 
 // WaitForChangeRequestsWithContext waits for change requests until notification, timeout, or context cancellation.
 func (r *Registry) WaitForChangeRequestsWithContext(ctx context.Context, names []string, duration time.Duration) map[string]any {
-	r.waitForNotificationWithContext(ctx, &r.changeRequestListeners, names, duration)
+	if ctx == nil {
+		ctx = context.Background()
+	}
 
+	requests := r.takePendingRequestsWithContext(ctx, names)
+	if len(requests) > 0 || duration <= 0 {
+		return requests
+	}
+
+	changed := make(chan struct{}, 1)
+	listenerID := r.changeRequestListeners.Add(func(name string) {
+		if names == nil || slices.Contains(names, name) {
+			select {
+			case changed <- struct{}{}:
+			default:
+			}
+		}
+	})
+	defer r.changeRequestListeners.Remove(listenerID)
+
+	// A request may have arrived between the first queue check and listener registration.
+	requests = r.takePendingRequestsWithContext(ctx, names)
+	if len(requests) > 0 {
+		return requests
+	}
+
+	timeoutTimer := time.NewTimer(duration)
+	defer timeoutTimer.Stop()
+	select {
+	case <-ctx.Done():
+		return map[string]any{}
+	case <-changed:
+	case <-timeoutTimer.C:
+	}
+
+	return r.takePendingRequestsWithContext(ctx, names)
+}
+
+func (r *Registry) takePendingRequests(names []string) map[string]any {
+	return r.takePendingRequestsWithContext(context.Background(), names)
+}
+
+func (r *Registry) takePendingRequestsWithContext(ctx context.Context, names []string) map[string]any {
 	r.pendingRequestsMu.Lock()
 	defer r.pendingRequestsMu.Unlock()
 
 	requests := make(map[string]any)
+	if ctx.Err() != nil {
+		return requests
+	}
 
 	if names == nil {
 		// Return all pending requests
