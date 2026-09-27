@@ -14,6 +14,8 @@ import (
 	"github.com/rivo/tview"
 )
 
+const collapsedNodeMarker = "[yellow:darkblue] @[-:-]"
+
 type Browser struct {
 	app          *tview.Application
 	client       client.Client
@@ -27,6 +29,8 @@ type Browser struct {
 	editingReg   string
 	filtering    bool
 	filterTerm   string
+	treeExpanded map[string]bool
+	treeNodePath map[*tview.TreeNode]string
 
 	// UI components
 	mainFlex      *tview.Flex
@@ -67,6 +71,8 @@ func New(c client.Client) *Browser {
 		registers:    make(map[string]*RegisterData),
 		treeMode:     false,
 		showMetadata: true,
+		treeExpanded: make(map[string]bool),
+		treeNodePath: make(map[*tview.TreeNode]string),
 	}
 
 	b.setupUI()
@@ -262,7 +268,7 @@ func (b *Browser) setupKeyBindings() {
 				if node != nil {
 					// If it's a folder (has children), expand/collapse
 					if len(node.GetChildren()) > 0 {
-						node.SetExpanded(!node.IsExpanded())
+						b.setTreeNodeExpanded(node, !node.IsExpanded())
 						return nil
 					}
 					// If it's a leaf (register), edit it
@@ -363,6 +369,7 @@ func (b *Browser) updateListTable() {
 func (b *Browser) updateTreeView() {
 	b.registersMu.RLock()
 	defer b.registersMu.RUnlock()
+	b.captureTreeExpansionState()
 
 	root := tview.NewTreeNode("Registers").
 		SetColor(tcell.ColorYellow).
@@ -394,7 +401,8 @@ func (b *Browser) updateTreeView() {
 		current.Register = reg
 	}
 
-	b.buildTreeNodes(root, rootTree)
+	b.treeNodePath = make(map[*tview.TreeNode]string)
+	b.buildTreeNodes(root, rootTree, "")
 	b.treeView.SetRoot(root)
 
 	// Update title with count
@@ -405,7 +413,27 @@ func (b *Browser) updateTreeView() {
 	b.treeView.SetTitle(title)
 }
 
-func (b *Browser) buildTreeNodes(parent *tview.TreeNode, tree *TreeNode) {
+func (b *Browser) captureTreeExpansionState() {
+	if b.treeExpanded == nil {
+		b.treeExpanded = make(map[string]bool)
+	}
+	if b.treeView == nil || b.treeView.GetRoot() == nil {
+		return
+	}
+
+	var capture func(*tview.TreeNode)
+	capture = func(parent *tview.TreeNode) {
+		for _, node := range parent.GetChildren() {
+			if path, ok := b.treeNodePath[node]; ok {
+				b.treeExpanded[path] = node.IsExpanded()
+			}
+			capture(node)
+		}
+	}
+	capture(b.treeView.GetRoot())
+}
+
+func (b *Browser) buildTreeNodes(parent *tview.TreeNode, tree *TreeNode, parentPath string) {
 	if tree.Children == nil {
 		return
 	}
@@ -418,9 +446,14 @@ func (b *Browser) buildTreeNodes(parent *tview.TreeNode, tree *TreeNode) {
 
 	for _, key := range keys {
 		child := tree.Children[key]
+		path := key
+		if parentPath != "" {
+			path = parentPath + "." + key
+		}
 		node := tview.NewTreeNode(key)
 		node.SetSelectable(true)
 		node.SetTextStyle(tcell.Style{}.Background(tcell.ColorDarkBlue))
+		b.treeNodePath[node] = path
 
 		if child.Register != nil {
 			foregroundColor := tcell.ColorWhite
@@ -447,12 +480,25 @@ func (b *Browser) buildTreeNodes(parent *tview.TreeNode, tree *TreeNode) {
 		}
 
 		if len(child.Children) > 0 {
-			node.SetExpanded(true) // Start fully expanded
-			b.buildTreeNodes(node, child)
+			expanded, exists := b.treeExpanded[path]
+			if !exists {
+				expanded = true
+			}
+			b.buildTreeNodes(node, child, path)
+			b.setTreeNodeExpanded(node, expanded)
 		}
 
 		parent.AddChild(node)
 	}
+}
+
+func (b *Browser) setTreeNodeExpanded(node *tview.TreeNode, expanded bool) {
+	node.SetExpanded(expanded)
+	text := strings.TrimSuffix(node.GetText(), collapsedNodeMarker)
+	if !expanded && len(node.GetChildren()) > 0 {
+		text += collapsedNodeMarker
+	}
+	node.SetText(text)
 }
 
 func (b *Browser) updateMetadataView() {
@@ -575,7 +621,7 @@ func (b *Browser) expandAll() {
 }
 
 func (b *Browser) expandNode(node *tview.TreeNode) {
-	node.SetExpanded(true)
+	b.setTreeNodeExpanded(node, true)
 	for _, child := range node.GetChildren() {
 		b.expandNode(child)
 	}
@@ -592,7 +638,7 @@ func (b *Browser) collapseAll() {
 func (b *Browser) collapseNode(node *tview.TreeNode) {
 	// Don't collapse the root node
 	if node != b.treeView.GetRoot() {
-		node.SetExpanded(false)
+		b.setTreeNodeExpanded(node, false)
 	}
 	for _, child := range node.GetChildren() {
 		b.collapseNode(child)
