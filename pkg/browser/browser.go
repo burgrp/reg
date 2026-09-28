@@ -17,20 +17,21 @@ import (
 const collapsedNodeMarker = "[yellow:darkblue] @[-:-]"
 
 type Browser struct {
-	app          *tview.Application
-	client       client.Client
-	ctx          context.Context
-	cancel       context.CancelFunc
-	registers    map[string]*RegisterData
-	registersMu  sync.RWMutex
-	treeMode     bool
-	showMetadata bool
-	editing      bool
-	editingReg   string
-	filtering    bool
-	filterTerm   string
-	treeExpanded map[string]bool
-	treeNodePath map[*tview.TreeNode]string
+	app            *tview.Application
+	client         client.Client
+	ctx            context.Context
+	cancel         context.CancelFunc
+	changeRequests chan<- client.RegisterChangeRequest
+	registers      map[string]*RegisterData
+	registersMu    sync.RWMutex
+	treeMode       bool
+	showMetadata   bool
+	editing        bool
+	editingReg     string
+	filtering      bool
+	filterTerm     string
+	treeExpanded   map[string]bool
+	treeNodePath   map[*tview.TreeNode]string
 
 	// UI components
 	mainFlex      *tview.Flex
@@ -826,16 +827,16 @@ func (b *Browser) submitBooleanEdit() {
 		newValue = nil
 	}
 
-	// Send change request
-	go func() {
-		_, requests, err := b.client.Consume(b.ctx, regName)
-		if err != nil {
-			return
-		}
-		requests <- newValue
-	}()
+	b.sendChangeRequest(regName, newValue)
 
 	b.cancelBooleanEdit()
+}
+
+func (b *Browser) sendChangeRequest(regName string, value any) {
+	select {
+	case b.changeRequests <- client.RegisterChangeRequest{Name: regName, Value: value}:
+	case <-b.ctx.Done():
+	}
 }
 
 func (b *Browser) cancelBooleanEdit() {
@@ -971,14 +972,7 @@ func (b *Browser) submitEdit() {
 		}
 	}
 
-	// Send change request
-	go func() {
-		_, requests, err := b.client.Consume(b.ctx, regName)
-		if err != nil {
-			return
-		}
-		requests <- parsedValue
-	}()
+	b.sendChangeRequest(regName, parsedValue)
 
 	b.cancelEdit()
 }
@@ -1104,10 +1098,11 @@ func (b *Browser) cancelFilter() {
 
 func (b *Browser) Run() error {
 	// Start consuming all registers
-	updates, _, err := b.client.ConsumeAll(b.ctx)
+	updates, changeRequests, err := b.client.ConsumeAll(b.ctx)
 	if err != nil {
 		return fmt.Errorf("failed to consume registers: %w", err)
 	}
+	b.changeRequests = changeRequests
 
 	// Start background goroutine to handle updates
 	go func() {

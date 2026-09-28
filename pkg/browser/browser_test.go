@@ -1,9 +1,12 @@
 package browser
 
 import (
+	"context"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/burgrp/reg/pkg/client"
 	"github.com/rivo/tview"
 )
 
@@ -122,6 +125,42 @@ func TestExpandCollapseAllUpdatesMarkers(t *testing.T) {
 	browser.expandAll()
 	if strings.HasSuffix(devicesNode.GetText(), collapsedNodeMarker) {
 		t.Fatal("expand all did not remove marker")
+	}
+}
+
+func TestSubmitBooleanEditSendsRepeatedChanges(t *testing.T) {
+	requests := make(chan client.RegisterChangeRequest, 2)
+	browser := &Browser{
+		ctx:            context.Background(),
+		changeRequests: requests,
+		app:            tview.NewApplication(),
+		pages:          tview.NewPages(),
+		listTable:      tview.NewTable(),
+	}
+
+	browser.editing = true
+	browser.editingReg = "enabled"
+	browser.boolSelection = 0
+	browser.submitBooleanEdit()
+
+	browser.editing = true
+	browser.editingReg = "enabled"
+	browser.boolSelection = 1
+	browser.submitBooleanEdit()
+
+	want := []bool{true, false}
+	for _, wantValue := range want {
+		select {
+		case request := <-requests:
+			if request.Name != "enabled" {
+				t.Fatalf("expected request for enabled, got %q", request.Name)
+			}
+			if request.Value != wantValue {
+				t.Fatalf("expected value %v, got %#v", wantValue, request.Value)
+			}
+		case <-time.After(time.Second):
+			t.Fatalf("timed out waiting for value %v", wantValue)
+		}
 	}
 }
 
