@@ -333,7 +333,8 @@ export class Client {
         if (changed || !candidate._hasValue) candidate._emitValue(update)
       }
     } catch {
-      // Silently ignore initial fetch errors (including AbortError); polling will retry
+      if (signal.aborted || sub.stopped || (this.#consumerRevisions.get(name) ?? 0) !== revision) return
+      this.#invalidateConsumers([name])
     }
   }
 
@@ -351,11 +352,15 @@ export class Client {
     const waitStr = `${this.consumerPollInterval / 1000}s`
     while (this.#consumerSubs.size > 0) {
       const names = [...this.#consumerSubs.keys()]
+      const revisions = new Map(names.map(name => [name, this.#consumerRevisions.get(name) ?? 0]))
       try {
         const registers = await this.#consumerWire.getRegisters(names, waitStr, controller.signal)
         this.#distributeConsumerUpdates(registers, names)
       } catch (err) {
-        if (err?.name === 'AbortError') break
+        if (controller.signal.aborted) break
+        this.#invalidateConsumers(names.filter(name =>
+          (this.#consumerRevisions.get(name) ?? 0) === revisions.get(name)
+        ))
         await sleep(1000)
       }
     }
@@ -383,6 +388,14 @@ export class Client {
         if (changed || !sub._hasValue) sub._emitValue(update)
       }
     }
+  }
+
+  #invalidateConsumers(names) {
+    const activeNames = names.filter(name => this.#consumerSubs.has(name))
+    const registers = Object.fromEntries(activeNames.map(name => [
+      name, { ...this.#consumerLastValues.get(name), value: null },
+    ]))
+    this.#distributeConsumerUpdates(registers, activeNames)
   }
 
   _requestChange(name, value) {
@@ -437,7 +450,8 @@ export class Client {
       this.#consumeAllRevision++
       this.#applyConsumeAllSnapshot(registers)
     } catch {
-      // Silently ignore initial fetch errors (including AbortError)
+      if (signal.aborted || sub.stopped || this.#consumeAllRevision !== revision) return
+      this.#invalidateConsumeAll()
     }
   }
 
@@ -454,12 +468,14 @@ export class Client {
   async #runConsumeAllLoop(controller) {
     const waitStr = `${this.consumerPollInterval / 1000}s`
     while (this.#consumeAllSubs.size > 0) {
+      const revision = this.#consumeAllRevision
       try {
         const registers = await this.#consumerWire.getRegisters([], waitStr, controller.signal)
         this.#consumeAllRevision++
         this.#applyConsumeAllSnapshot(registers)
       } catch (err) {
-        if (err?.name === 'AbortError') break
+        if (controller.signal.aborted) break
+        if (this.#consumeAllRevision === revision) this.#invalidateConsumeAll()
         await sleep(1000)
       }
     }
@@ -488,6 +504,15 @@ export class Client {
         if (sub._hasRegisterName(name)) sub._emitUpdate(update)
       }
     }
+  }
+
+  #invalidateConsumeAll() {
+    this.#consumeAllRevision++
+    this.#applyConsumeAllSnapshot(Object.fromEntries(
+      [...this.#consumeAllLastValues].map(([name, register]) => [
+        name, { ...register, value: null },
+      ])
+    ))
   }
 
   _removeConsumeAll(sub) {

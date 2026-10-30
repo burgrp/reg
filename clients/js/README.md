@@ -50,6 +50,19 @@ Event-driven, with batching optimisation:
 * Providers automatically refresh their TTL at `ttl / 2` to prevent expiry.
 * Change detection avoids redundant events when values are unchanged.
 
+### Výpadek registry
+
+Při chybě čtení `consume(name)` nastaví dotčenou hodnotu v cache na `null`
+a oznámí ji událostí `value`. `consumeAll()` obdobně oznámí `null` pro
+již známé registry, ale neoznačí je jako odstraněné. Metadata zůstávají
+zachována. Opakovaná chyba nevytváří další shodné události.
+
+Po úspěšném obnovení čtení klient oznámí skutečnou hodnotu, i když je
+stejná jako před výpadkem. Opožděná chyba staršího požadavku nepřepíše
+novější úspěšně načtená data; úmyslné ukončení odběru nevyvolá `null`.
+Přechod nastává až při chybě požadavku, nikoliv samotným uplynutím doby
+bez změny hodnoty. Automatické obnovování TTL poskytovatelů se nemění.
+
 ## Quick Start
 
 ```js

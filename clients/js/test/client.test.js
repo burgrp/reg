@@ -29,8 +29,8 @@ function createControllableFetch() {
       else options?.signal?.addEventListener('abort', abort, { once: true })
     })
 
-  const respond = (body, status = 200) => {
-    const entry = queue.shift()
+  const respond = (body, status = 200, index = 0) => {
+    const entry = queue.splice(index, 1)[0]
     if (!entry) throw new Error('No pending fetch to respond to')
     entry.resolve({
       ok: status >= 200 && status < 300,
@@ -40,8 +40,8 @@ function createControllableFetch() {
     })
   }
 
-  const respondError = (message = 'network error') => {
-    const entry = queue.shift()
+  const respondError = (message = 'network error', index = 0) => {
+    const entry = queue.splice(index, 1)[0]
     if (!entry) throw new Error('No pending fetch to reject')
     entry.reject(new Error(message))
   }
@@ -70,6 +70,124 @@ describe('Client', () => {
   })
 
   describe('consume()', () => {
+    it('invalidates cached values on a failed poll and restores unchanged values after recovery', async t => {
+      t.mock.timers.enable({ apis: ['setTimeout'] })
+      const { fetchFn, respond, respondError } = createControllableFetch()
+      const client = new Client('http://localhost:8080', { fetch: fetchFn })
+      const values = []
+      const sub = client.consume('temp')
+      t.after(() => sub.stop())
+      sub.on('value', value => values.push(value))
+
+      respond({ registers: { temp: { value: 21.5, metadata: { unit: 'celsius' } } } })
+      await tick()
+      respond({ registers: { temp: { value: 21.5, metadata: { unit: 'celsius' } } } })
+      await tick()
+      respondError()
+      await tick()
+      assert.deepEqual(values, [
+        { value: 21.5, metadata: { unit: 'celsius' } },
+        { value: null, metadata: { unit: 'celsius' } },
+      ])
+
+      t.mock.timers.tick(1000)
+      await tick()
+      respondError()
+      await tick()
+      assert.equal(values.length, 2)
+
+      t.mock.timers.tick(1000)
+      await tick()
+      respond({ registers: { temp: { value: 21.5, metadata: { unit: 'celsius' } } } })
+      await tick()
+      assert.deepEqual(values.at(-1), { value: 21.5, metadata: { unit: 'celsius' } })
+      assert.equal(values.length, 3)
+    })
+
+    it('emits null on an initial read failure and accepts recovery from the pending poll', async t => {
+      const { fetchFn, respond, respondError } = createControllableFetch()
+      const client = new Client('http://localhost:8080', { fetch: fetchFn })
+      const values = []
+      const sub = client.consume('temp')
+      t.after(() => sub.stop())
+      sub.on('value', value => values.push(value.value))
+
+      respondError()
+      await tick()
+      assert.deepEqual(values, [null])
+      respond({ registers: { temp: { value: 21.5 } } })
+      await tick()
+      assert.deepEqual(values, [null, 21.5])
+    })
+
+    it('invalidates every requested register and same-name subscriber on HTTP failure', async t => {
+      t.mock.timers.enable({ apis: ['setTimeout'] })
+      const { fetchFn, respond } = createControllableFetch()
+      const client = new Client('http://localhost:8080', { fetch: fetchFn })
+      const first = client.consume('temp')
+      const second = client.consume('temp')
+      const other = client.consume('humidity')
+      t.after(() => { first.stop(); second.stop(); other.stop() })
+      const values = [[], [], []]
+      ;[first, second, other].forEach((sub, index) => sub.on('value', update => values[index].push(update.value)))
+
+      respond({ registers: { temp: { value: 21.5 } } })
+      await tick()
+      respond({ registers: { temp: { value: 21.5 } } })
+      await tick()
+      respond({ registers: { temp: { value: 21.5 } } })
+      await tick()
+      respond({ registers: { humidity: { value: 55 } } })
+      await tick()
+      respond({ registers: { temp: { value: 21.5 }, humidity: { value: 55 } } })
+      await tick()
+      respond({}, 503)
+      await tick()
+      assert.deepEqual(values, [[21.5, null], [21.5, null], [55, null]])
+    })
+
+    it('does not invalidate a newer successful poll when an older initial request fails', async t => {
+      const { fetchFn, respond, respondError } = createControllableFetch()
+      const client = new Client('http://localhost:8080', { fetch: fetchFn })
+      const values = []
+      const sub = client.consume('temp')
+      t.after(() => sub.stop())
+      sub.on('value', update => values.push(update.value))
+
+      respond({ registers: { temp: { value: 21.5 } } }, 200, 1)
+      await tick()
+      respondError('delayed initial failure')
+      await tick()
+      assert.deepEqual(values, [21.5])
+    })
+
+    it('does not invalidate newer initial data when an older poll fails', async t => {
+      t.mock.timers.enable({ apis: ['setTimeout'] })
+      const { fetchFn, respond, respondError } = createControllableFetch()
+      const client = new Client('http://localhost:8080', { fetch: fetchFn })
+      const values = []
+      const sub = client.consume('temp')
+      t.after(() => sub.stop())
+      sub.on('value', update => values.push(update.value))
+
+      respond({ registers: { temp: { value: 21.5 } } })
+      await tick()
+      respondError()
+      await tick()
+      assert.deepEqual(values, [21.5])
+    })
+
+    it('does not emit null when a subscription is intentionally stopped', async () => {
+      const { fetchFn } = createControllableFetch()
+      const client = new Client('http://localhost:8080', { fetch: fetchFn })
+      const values = []
+      const sub = client.consume('temp')
+      sub.on('value', update => values.push(update.value))
+      sub.stop()
+      await tick()
+      assert.deepEqual(values, [])
+    })
+
     it('returns a ConsumerSubscription immediately', () => {
       const client = new Client('http://localhost:8080', {
         // Abort-aware never-resolving mock so pending fetches clean up on stop()
@@ -742,6 +860,74 @@ describe('Client', () => {
   })
 
   describe('consumeAll()', () => {
+    it('invalidates known registers on failure without removing them and restores identical values', async t => {
+      t.mock.timers.enable({ apis: ['setTimeout'] })
+      const { fetchFn, respond, respondError } = createControllableFetch()
+      const client = new Client('http://localhost:8080', { fetch: fetchFn })
+      const updates = []
+      const sub = client.consumeAll()
+      t.after(() => sub.stop())
+      sub.on('update', update => updates.push(update))
+      const snapshot = { registers: {
+        temp: { value: 21.5, metadata: { unit: 'celsius' } },
+        humidity: { value: 55 },
+      } }
+      respond(snapshot)
+      await tick()
+      respond(snapshot)
+      await tick()
+      respondError()
+      await tick()
+      assert.deepEqual(updates.slice(-2), [
+        { name: 'temp', value: null, metadata: { unit: 'celsius' } },
+        { name: 'humidity', value: null, metadata: {} },
+      ])
+      t.mock.timers.tick(1000)
+      await tick()
+      respondError()
+      await tick()
+      assert.equal(updates.length, 4)
+      t.mock.timers.tick(1000)
+      await tick()
+      respond(snapshot)
+      await tick()
+      assert.deepEqual(updates.slice(-2), [
+        { name: 'temp', value: 21.5, metadata: { unit: 'celsius' } },
+        { name: 'humidity', value: 55, metadata: {} },
+      ])
+      assert.equal(updates.length, 6)
+    })
+
+    it('does not invalidate newer snapshots after an old initial failure', async t => {
+      const { fetchFn, respond, respondError } = createControllableFetch()
+      const client = new Client('http://localhost:8080', { fetch: fetchFn })
+      const updates = []
+      const sub = client.consumeAll()
+      t.after(() => sub.stop())
+      sub.on('update', update => updates.push(update))
+      respond({ registers: { temp: { value: 21.5 } } }, 200, 1)
+      await tick()
+      respondError()
+      await tick()
+      assert.deepEqual(updates, [{ name: 'temp', value: 21.5, metadata: {} }])
+    })
+
+    it('invalidates cached all-register values if a subsequent initial request fails', async t => {
+      const { fetchFn, respond, respondError } = createControllableFetch()
+      const client = new Client('http://localhost:8080', { fetch: fetchFn })
+      const sub = client.consumeAll()
+      t.after(() => sub.stop())
+      respond({ registers: { temp: { value: 21.5 } } })
+      await tick()
+      const updates = []
+      const second = client.consumeAll()
+      t.after(() => second.stop())
+      second.on('update', update => updates.push(update))
+      respondError('new subscriber initial failure', 1)
+      await tick()
+      assert.deepEqual(updates, [{ name: 'temp', value: null, metadata: {} }])
+    })
+
     it('emits update events for all registers on initial fetch', async () => {
       const { fetchFn, respond } = createControllableFetch()
       const client = new Client('http://localhost:8080', {
