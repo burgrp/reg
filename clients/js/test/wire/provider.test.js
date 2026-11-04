@@ -79,18 +79,24 @@ describe('ProviderClient', () => {
       await assert.rejects(() => client.setRegisters({ temp: { value: 1 } }), /HTTP 400/)
     })
 
-    it('sends boolean and null values correctly', async () => {
+    it('sends explicit null for unset values and preserves boolean and zero values', async () => {
       const { fetchFn, calls } = mockFetch(204, '')
       const client = new ProviderClient('http://localhost:8080', fetchFn)
 
       await client.setRegisters({
         flag: { value: true },
+        off: { value: false },
+        zero: { value: 0 },
         empty: { value: null },
+        unset: { value: undefined },
       })
 
       const body = JSON.parse(calls[0].options.body)
       assert.equal(body.registers.flag.value, true)
+      assert.equal(body.registers.off.value, false)
+      assert.equal(body.registers.zero.value, 0)
       assert.equal(body.registers.empty.value, null)
+      assert.deepEqual(body.registers.unset, { value: null })
     })
   })
 
@@ -147,12 +153,33 @@ describe('ProviderClient', () => {
       for (const body of [
         {},
         { registers: [] },
-        { registers: { temp: {} } },
+        { registers: { temp: null } },
+        { registers: { temp: [] } },
+        { registers: { temp: 'invalid' } },
       ]) {
         const { fetchFn } = mockFetch(200, body)
         const client = new ProviderClient('http://localhost:8080', fetchFn)
         await assert.rejects(() => client.getChangeRequests(['temp']), /invalid/)
       }
+    })
+
+    it('accepts legacy null requests without confusing them with false or zero', async () => {
+      const { fetchFn } = mockFetch(200, { registers: {
+        legacy: {},
+        empty: { value: null },
+        off: { value: false },
+        zero: { value: 0 },
+        inherited: Object.create({ value: 42 }),
+      } })
+      const client = new ProviderClient('http://localhost:8080', fetchFn)
+
+      assert.deepEqual(await client.getChangeRequests(['legacy', 'empty', 'off', 'zero', 'inherited']), {
+        legacy: null,
+        empty: null,
+        off: false,
+        zero: 0,
+        inherited: null,
+      })
     })
 
     it('preserves prototype-like register names', async () => {

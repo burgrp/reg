@@ -12,11 +12,11 @@ function parseChangeRequests(body) {
     throw new Error('GET /provider returned an invalid response')
   }
   return Object.fromEntries(Object.entries(body.registers).map(([name, register]) => {
-    if (register === null || typeof register !== 'object' || Array.isArray(register) ||
-        !Object.hasOwn(register, 'value')) {
+    if (register === null || typeof register !== 'object' || Array.isArray(register)) {
       throw new Error(`GET /provider returned an invalid register '${name}'`)
     }
-    return [name, register.value]
+    // Older servers omit value for queued null change requests.
+    return [name, Object.hasOwn(register, 'value') ? (register.value ?? null) : null]
   }))
 }
 
@@ -49,7 +49,7 @@ export class ProviderClient {
         Object.entries(registers).map(([name, reg]) => [
           name,
           {
-            value: reg.value,
+            value: reg.value ?? null,
             ...(reg.metadata != null && { metadata: reg.metadata }),
             ...(reg.ttl != null && { ttl: reg.ttl }),
           },

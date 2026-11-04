@@ -76,7 +76,9 @@ describe('ConsumerClient', () => {
     it('rejects malformed registers and metadata', async () => {
       for (const body of [
         { registers: [] },
-        { registers: { temp: {} } },
+        { registers: { temp: null } },
+        { registers: { temp: [] } },
+        { registers: { temp: 'invalid' } },
         { registers: { temp: { value: 20, metadata: null } } },
         { registers: { temp: { value: 20, metadata: [] } } },
       ]) {
@@ -84,6 +86,27 @@ describe('ConsumerClient', () => {
         const client = new ConsumerClient('http://localhost:8080', fetchFn)
         await assert.rejects(() => client.getRegisters(), /invalid/)
       }
+    })
+
+    it('normalizes omitted values without discarding metadata or valid registers', async () => {
+      const { fetchFn } = mockFetch(200, { registers: {
+        normal: { value: 0 },
+        off: { value: false },
+        empty: { value: null },
+        unset: { metadata: { device: 'logic' } },
+        unavailable: {},
+        inherited: Object.create({ value: 42 }),
+      } })
+      const client = new ConsumerClient('http://localhost:8080', fetchFn)
+
+      assert.deepEqual(await client.getRegisters(), {
+        normal: { value: 0 },
+        off: { value: false },
+        empty: { value: null },
+        unset: { value: null, metadata: { device: 'logic' } },
+        unavailable: { value: null },
+        inherited: { value: null },
+      })
     })
 
     it('preserves prototype-like register names', async () => {
@@ -153,14 +176,19 @@ describe('ConsumerClient', () => {
       await assert.rejects(() => client.requestChanges({ temp: 1 }), /HTTP 400/)
     })
 
-    it('sends null value correctly', async () => {
+    it('sends explicit null for unset values and preserves false and zero', async () => {
       const { fetchFn, calls } = mockFetch(202, '')
       const client = new ConsumerClient('http://localhost:8080', fetchFn)
 
-      await client.requestChanges({ temp: null })
+      await client.requestChanges({ temp: null, unset: undefined, off: false, zero: 0 })
 
       const body = JSON.parse(calls[0].options.body)
-      assert.deepEqual(body.registers.temp, { value: null })
+      assert.deepEqual(body.registers, {
+        temp: { value: null },
+        unset: { value: null },
+        off: { value: false },
+        zero: { value: 0 },
+      })
     })
   })
 })

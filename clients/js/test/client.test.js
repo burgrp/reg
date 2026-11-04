@@ -70,6 +70,58 @@ describe('Client', () => {
   })
 
   describe('consume()', () => {
+    it('reports initial absence only after receiving a snapshot and suppresses duplicate nulls', async t => {
+      const { fetchFn, respond } = createControllableFetch()
+      const client = new Client('http://localhost:8080', { fetch: fetchFn })
+      const values = []
+      const sub = client.consume('temp')
+      t.after(() => sub.stop())
+      sub.on('value', update => values.push(update))
+
+      await tick()
+      assert.deepEqual(values, [])
+      respond({ registers: {} })
+      await tick()
+      assert.deepEqual(values, [{ value: null, metadata: {} }])
+      respond({ registers: {} })
+      await tick()
+      assert.equal(values.length, 1)
+    })
+
+    it('reports legacy and current missing values to every same-name subscriber without invalidating other inputs', async t => {
+      const { fetchFn, respond } = createControllableFetch()
+      const client = new Client('http://localhost:8080', { fetch: fetchFn })
+      const first = client.consume('temp')
+      const second = client.consume('temp')
+      const other = client.consume('humidity')
+      t.after(() => { first.stop(); second.stop(); other.stop() })
+      const values = [[], [], []]
+      ;[first, second, other].forEach((sub, index) => sub.on('value', update => values[index].push(update)))
+      const temperature = { temp: { value: 21.5, metadata: { unit: 'celsius' } } }
+
+      for (let index = 0; index < 3; index++) {
+        respond({ registers: temperature })
+        await tick()
+      }
+      respond({ registers: { humidity: { value: 55 } } })
+      await tick()
+      respond({ registers: { temp: {}, humidity: { value: 55 } } })
+      await tick()
+      respond({ registers: { humidity: { value: 55 } } })
+      await tick()
+      respond({ registers: { ...temperature, humidity: { value: 55 } } })
+      await tick()
+
+      const expected = [
+        { value: 21.5, metadata: { unit: 'celsius' } },
+        { value: null, metadata: { unit: 'celsius' } },
+        { value: 21.5, metadata: { unit: 'celsius' } },
+      ]
+      assert.deepEqual(values[0], expected)
+      assert.deepEqual(values[1], expected)
+      assert.deepEqual(values[2], [{ value: 55, metadata: {} }])
+    })
+
     it('invalidates cached values on a failed poll and restores unchanged values after recovery', async t => {
       t.mock.timers.enable({ apis: ['setTimeout'] })
       const { fetchFn, respond, respondError } = createControllableFetch()
@@ -397,6 +449,7 @@ describe('Client', () => {
 
       assert.deepEqual(values, [
         { value: 21.5, metadata: {} },
+        { value: null, metadata: {} },
         { value: 21.5, metadata: {} },
       ])
       sub.stop()
@@ -529,7 +582,7 @@ describe('Client', () => {
       sub.stop()
     })
 
-    it('does not fabricate a missing register with a prototype-like name', async () => {
+    it('reports unknown rather than fabricating a missing register with a prototype-like name', async () => {
       const fetchFn = (rawURL, options) => {
         if (!new URL(rawURL).searchParams.has('wait')) {
           return Promise.resolve({
@@ -555,12 +608,30 @@ describe('Client', () => {
       await tick()
       await tick()
 
-      assert.deepEqual(values, [])
+      assert.deepEqual(values, [{ value: null, metadata: {} }])
       sub.stop()
     })
   })
 
   describe('provide()', () => {
+    it('delivers legacy null change requests as commands, separately from false', async t => {
+      const { fetchFn, respond } = createControllableFetch()
+      const client = new Client('http://localhost:8080', { fetch: fetchFn })
+      const changes = []
+      const pub = client.provide('temp', 21.5)
+      t.after(() => pub.stop())
+      pub.on('change', value => changes.push(value))
+
+      respond({}, 204)
+      await tick()
+      for (const register of [{}, { value: false }, { value: null }]) {
+        respond({ registers: { temp: register } })
+        await tick()
+      }
+
+      assert.deepEqual(changes, [null, false, null])
+    })
+
     it('sets register immediately and returns ProviderSubscription', async () => {
       const calls = []
       // PUT resolves immediately; GET /provider blocks until aborted (prevents tight polling loop)
@@ -860,6 +931,35 @@ describe('Client', () => {
   })
 
   describe('consumeAll()', () => {
+    it('keeps valid registers when legacy snapshots contain unset values', async t => {
+      const { fetchFn, respond } = createControllableFetch()
+      const client = new Client('http://localhost:8080', { fetch: fetchFn })
+      const updates = []
+      const sub = client.consumeAll()
+      t.after(() => sub.stop())
+      sub.on('update', update => updates.push(update))
+      const snapshot = { registers: {
+        master: { value: 0 },
+        enabled: { value: false },
+        power: { value: 0 },
+        target: { metadata: { device: 'logic' } },
+        unavailable: {},
+      } }
+
+      respond(snapshot)
+      await tick()
+      respond(snapshot)
+      await tick()
+
+      assert.deepEqual(updates, [
+        { name: 'master', value: 0, metadata: {} },
+        { name: 'enabled', value: false, metadata: {} },
+        { name: 'power', value: 0, metadata: {} },
+        { name: 'target', value: null, metadata: { device: 'logic' } },
+        { name: 'unavailable', value: null, metadata: {} },
+      ])
+    })
+
     it('invalidates known registers on failure without removing them and restores identical values', async t => {
       t.mock.timers.enable({ apis: ['setTimeout'] })
       const { fetchFn, respond, respondError } = createControllableFetch()

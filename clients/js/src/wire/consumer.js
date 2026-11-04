@@ -11,17 +11,17 @@ function parseRegisters(body) {
       typeof body.registers !== 'object' || Array.isArray(body.registers)) {
     throw new Error('GET /consumer returned an invalid response')
   }
-  for (const [name, register] of Object.entries(body.registers)) {
-    if (register === null || typeof register !== 'object' || Array.isArray(register) ||
-        !Object.hasOwn(register, 'value')) {
+  return Object.fromEntries(Object.entries(body.registers).map(([name, register]) => {
+    if (register === null || typeof register !== 'object' || Array.isArray(register)) {
       throw new Error(`GET /consumer returned an invalid register '${name}'`)
     }
     if (Object.hasOwn(register, 'metadata') &&
         (register.metadata === null || typeof register.metadata !== 'object' || Array.isArray(register.metadata))) {
       throw new Error(`GET /consumer returned invalid metadata for register '${name}'`)
     }
-  }
-  return body.registers
+    // Older servers omit value for unset or unavailable registers.
+    return [name, { ...register, value: Object.hasOwn(register, 'value') ? (register.value ?? null) : null }]
+  }))
 }
 
 export class ConsumerClient {
@@ -61,7 +61,7 @@ export class ConsumerClient {
     }
 
     const body = await res.json()
-  return parseRegisters(body)
+    return parseRegisters(body)
   }
 
   /**
@@ -76,7 +76,7 @@ export class ConsumerClient {
     const url = `${this.#baseURL}/consumer`
     const body = {
       registers: Object.fromEntries(
-        Object.entries(changes).map(([name, value]) => [name, { value }])
+        Object.entries(changes).map(([name, value]) => [name, { value: value ?? null }])
       ),
     }
 

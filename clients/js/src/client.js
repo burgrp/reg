@@ -318,20 +318,8 @@ export class Client {
       const registers = await this.#consumerWire.getRegisters([name], null, signal)
       if (sub.stopped || (this.#consumerRevisions.get(name) ?? 0) !== revision) return
 
-      this.#consumerRevisions.set(name, revision + 1)
-      if (!Object.hasOwn(registers, name)) {
-        this.#consumerLastValues.delete(name)
-        return
-      }
-
-      const reg = registers[name]
-      const last = this.#consumerLastValues.get(name)
-      const changed = !last || !deepEqual(reg.value, last.value) || !deepEqual(reg.metadata, last.metadata)
-      this.#consumerLastValues.set(name, reg)
-      const update = { value: reg.value, metadata: reg.metadata ?? {} }
-      for (const candidate of this.#consumerSubs.get(name) ?? []) {
-        if (changed || !candidate._hasValue) candidate._emitValue(update)
-      }
+      const selected = Object.hasOwn(registers, name) ? { [name]: registers[name] } : {}
+      this.#distributeConsumerUpdates(selected, [name])
     } catch {
       if (signal.aborted || sub.stopped || (this.#consumerRevisions.get(name) ?? 0) !== revision) return
       this.#invalidateConsumers([name])
@@ -370,20 +358,26 @@ export class Client {
   }
 
   #distributeConsumerUpdates(registers, requestedNames) {
+    const updates = new Map(Object.entries(registers))
     for (const name of requestedNames) {
       this.#consumerRevisions.set(name, (this.#consumerRevisions.get(name) ?? 0) + 1)
-      if (!Object.hasOwn(registers, name)) this.#consumerLastValues.delete(name)
+      if (!updates.has(name)) {
+        updates.set(name, { ...this.#consumerLastValues.get(name), value: null })
+      }
     }
 
-    for (const [name, reg] of Object.entries(registers)) {
+    for (const [name, reg] of updates) {
       const subs = this.#consumerSubs.get(name)
       if (!subs || subs.size === 0) continue
 
       const last = this.#consumerLastValues.get(name)
-      const changed = !last || !deepEqual(reg.value, last.value) || !deepEqual(reg.metadata, last.metadata)
+      const current = reg.value === null && reg.metadata === undefined
+        ? { ...reg, metadata: last?.metadata ?? {} }
+        : reg
+      const changed = !last || !deepEqual(current.value, last.value) || !deepEqual(current.metadata, last.metadata)
 
-      this.#consumerLastValues.set(name, reg)
-      const update = { value: reg.value, metadata: reg.metadata ?? {} }
+      this.#consumerLastValues.set(name, current)
+      const update = { value: current.value, metadata: current.metadata ?? {} }
       for (const sub of subs) {
         if (changed || !sub._hasValue) sub._emitValue(update)
       }

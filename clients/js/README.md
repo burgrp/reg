@@ -52,6 +52,21 @@ Event-driven, with batching optimisation:
 
 ### Výpadek registry
 
+Od verze `1.0.5` klient podporuje také odpovědi serveru `v1.0.11`, který
+u nenastavených hodnot vynechává pole `value`. Tyto záznamy převádí na
+`value: null`, nikoliv na normální stav; ostatní platné registry ve stejném
+snímku zůstávají dostupné. Stejně zpracuje starší formát povelu `null`
+v odpovědi `/provider`. Při odesílání se JavaScriptové `undefined`
+zapíše jako explicitní JSON `null`; `false` ani `0` se nemění.
+
+Pokud server při jmenovitém čtení vynechá požadovaný registr, `consume(name)`
+oznámí `null` i při první potvrzené nedostupnosti. Před první odpovědí
+hodnotu nevytváří. Metadata poslední známé hodnoty zůstávají při výpadku
+zachovaná a opakovaná nedostupnost nevytváří další shodné události.
+To pokrývá také novější servery, například `v1.0.15`, které chybějící
+jména vynechávají. `consumeAll()` nadále rozlišuje existující nenastavený
+registr (`value: null`) od odstraněného registru (`removed: true`).
+
 Při chybě čtení `consume(name)` nastaví dotčenou hodnotu v cache na `null`
 a oznámí ji událostí `value`. `consumeAll()` obdobně oznámí `null` pro
 již známé registry, ale neoznačí je jako odstraněné. Metadata zůstávají
