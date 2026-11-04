@@ -68,6 +68,7 @@ func handleMetrics(w http.ResponseWriter, reg *registry.Registry) {
 	registers := reg.WaitForChange(nil, 0)
 
 	w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+	declaredMetrics := make(map[string]bool)
 
 	for name, r := range registers {
 		floatVal, ok := toFloat64(r.Value)
@@ -77,6 +78,7 @@ func handleMetrics(w http.ResponseWriter, reg *registry.Registry) {
 
 		metricName := strings.ReplaceAll(name, ".", ":")
 		parts := strings.Split(metricName, ":")
+		metricName = sanitizeMetricName(metricName)
 
 		var labels []string
 		for i, part := range parts {
@@ -91,9 +93,32 @@ func handleMetrics(w http.ResponseWriter, reg *registry.Registry) {
 			labelStr = "{" + strings.Join(labels, ",") + "}"
 		}
 
-		fmt.Fprintf(w, "# TYPE %s gauge\n", metricName)
+		if !declaredMetrics[metricName] {
+			fmt.Fprintf(w, "# TYPE %s gauge\n", metricName)
+			declaredMetrics[metricName] = true
+		}
 		fmt.Fprintf(w, "%s%s %g\n", metricName, labelStr, floatVal)
 	}
+}
+
+func sanitizeMetricName(name string) string {
+	if name == "" {
+		return "_"
+	}
+
+	var b strings.Builder
+	if name[0] >= '0' && name[0] <= '9' {
+		b.WriteByte('_')
+	}
+	for _, r := range name {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '_', r == ':':
+			b.WriteRune(r)
+		default:
+			b.WriteByte('_')
+		}
+	}
+	return b.String()
 }
 
 // toFloat64 converts numeric register values to float64. Returns false for non-numeric types.

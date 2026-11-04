@@ -166,6 +166,7 @@ curl -X PUT http://localhost:8080/consumer \
 ### API Reference
 - [REST API](docs/rest-api.md) - Complete HTTP API reference
 - [Long Polling](docs/long-polling.md) - Real-time updates with long polling
+- [Metriky Prometheus](docs/development.md#metriky-prometheus) - Zapnutí exportu a převod názvů registrů
 
 ### Client Libraries
 - [Go Client Library](docs/go-client.md) - Using the Go client library

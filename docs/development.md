@@ -83,6 +83,38 @@ mypy clients/python/src
 LOG_LEVEL=debug ./reg serve
 ```
 
+### Metriky Prometheus
+
+Export metrik se zapíná samostatným HTTP rozhraním:
+
+```bash
+./reg serve --rest :8080 --metrics :9090
+```
+
+Exporter poskytuje na `/` i `/metrics` číselné registry jako metriky typu
+`gauge`; booleovské hodnoty převádí na `0` a `1`. Ostatní typy neexportuje.
+Nemění názvy ani hodnoty registrů v REST rozhraní.
+
+V názvu metriky nahrazuje tečky dvojtečkami. Platné názvy zachovává,
+před počáteční číslici přidává `_` a znaky mimo ASCII množinu
+`[a-zA-Z0-9_:]` nahrazuje `_`. Prázdný název převádí na `_`.
+Například registr nepojmenovaného Zigbee zařízení
+`0x00158d000483b274.temperature` exportuje jako
+`_0x00158d000483b274:temperature`. Takové zařízení proto nezneplatní
+celý scrape kvůli názvu začínajícímu číslicí.
+
+Štítky `n1`, `n2` atd. obsahují původní části názvu před touto normalizací.
+Registry jako `room-1.temperature` a `room_1.temperature` tak mají
+stejný název metriky, ale odlišné štítky a samostatné hodnoty.
+Deklarace `TYPE` se pro společný název zapisuje jen jednou.
+Existující platné názvy metrik a jejich štítky zůstávají beze změny.
+
+Regresní testy exportu:
+
+```bash
+go test -race ./internal/metrics
+```
+
 ## Project Structure
 
 ```
