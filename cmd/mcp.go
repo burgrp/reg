@@ -52,7 +52,7 @@ func runMCP() error {
 	server := mcp.NewServer(&mcp.Implementation{
 		Name:    "reg-registry",
 		Version: "1.0.0",
-	}, nil)
+	}, &mcp.ServerOptions{Logger: slog.Default()})
 
 	// Register tools
 	registerGetTool(server, regClient)

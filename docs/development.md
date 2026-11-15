@@ -83,6 +83,30 @@ mypy clients/python/src
 LOG_LEVEL=debug ./reg serve
 ```
 
+### Úroveň logování
+
+Od v1.0.17 řídí `LOG_LEVEL` diagnostické logování **všech příkazů**, včetně
+serveru registry, jeho REST rozhraní, metrik a MCP serveru. Logy se zapisují
+na standardní chybový výstup (`stderr`). Výsledky příkazů jako `get`, `list`
+nebo `version` ani JSON-RPC komunikace MCP na `stdout` se nefiltrují.
+Chybová hlášení CLI zůstávají viditelná bez ohledu na úroveň logování.
+
+Výchozí úroveň při nenastavené nebo prázdné proměnné je **INFO**.
+Přijímají se `debug`, `info`, `warn` a `error` bez ohledu na velikost písmen,
+také s číselným posunem podle Go `log/slog`, například `INFO+2`.
+Neplatná hodnota ukončí příkaz chybou ještě před jeho spuštěním;
+nápověda zůstává dostupná.
+
+```bash
+LOG_LEVEL=info ./reg serve --metrics :9090
+LOG_LEVEL=debug ./reg serve
+LOG_LEVEL=error REGISTRY=http://localhost:8080 ./reg list
+```
+
+Nastavení popisuje hlavní nápověda (`reg`, `reg --help`) i `reg serve --help`.
+Samostatný přepínač pro úroveň logování není zavedený.
+Starší verze `LOG_LEVEL` nečetly a `serve` měl pevně nastavenou úroveň DEBUG.
+
 ### Metriky Prometheus
 
 Export metrik se zapíná samostatným HTTP rozhraním:

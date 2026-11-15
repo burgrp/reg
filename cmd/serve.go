@@ -6,12 +6,10 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
-	"time"
 
 	"github.com/burgrp/reg/internal/metrics"
 	"github.com/burgrp/reg/internal/registry"
 	"github.com/burgrp/reg/internal/rest"
-	"github.com/lmittmann/tint"
 	"github.com/spf13/cobra"
 	"golang.org/x/sync/errgroup"
 )
@@ -23,7 +21,13 @@ func newServeCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "serve",
 		Short: "Start the registry",
-		Long:  `Starts the registry server with specified parameters.`,
+		Long: `Start a registry server with REST API and optional Prometheus metrics.
+
+LOG_LEVEL controls diagnostic logging (default: info).
+Accepts debug, info, warn, error (case-insensitive) and numeric offsets.
+
+Example:
+  LOG_LEVEL=debug reg serve --metrics :9090`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runServe(addr, metricsAddr)
 		},
@@ -36,11 +40,7 @@ func newServeCmd() *cobra.Command {
 }
 
 func runServe(addr string, metricsAddr string) error {
-	// Setup logger with tint
-	logger := slog.New(tint.NewHandler(os.Stderr, &tint.Options{
-		Level:      slog.LevelDebug,
-		TimeFormat: time.TimeOnly,
-	}))
+	logger := slog.Default()
 
 	// Create context that cancels on shutdown signal
 	ctx, cancel := context.WithCancel(context.Background())
